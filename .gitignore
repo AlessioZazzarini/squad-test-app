@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.tasks/worktrees/
+.tasks/sessions/
+.tasks/orchestration.lock
+.tasks/orchestration.pid
+.tasks/orchestration.log
+.claude/loop.local.md
