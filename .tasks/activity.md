@@ -1,30 +1,28 @@
-# Activity Log - Issue #1
+# Activity Log - Issue #3
 
 **Session started:** 2026-04-01
-**GitHub Issue:** #1 - App skeleton: repository interface + in-memory CRUD + tests
-**Source:** https://github.com/AlessioZazzarini/squad-test-app/issues/1
+**GitHub Issue:** #3 - Search and filter endpoint with pagination
+**Source:** https://github.com/AlessioZazzarini/squad-test-app/issues/3
 
 ---
 
 ## Session Log
 
 <!-- AgentSquad will append entries here during iterations -->
-[2026-04-01 14:52:23] === AgentSquad Loop Started (max 15 iterations) ===
-[2026-04-01 14:52:23] --- Iteration 1 started ---
-[2026-04-01 14:52:45] Completed tasks 1-5 in single iteration:
-  - Task 1: Created repository.py with ItemRepository ABC (4 abstract methods)
-  - Task 2: Created memory_repo.py with MemoryRepository (dict + UUID storage)
-  - Task 3: Updated app.py with GET/POST /items and GET/DELETE /items/<id> endpoints
-  - Task 4: Wrote 9 pytest tests covering all CRUD ops, 404 cases, and ABC constraint
-  - Task 5: Verified all acceptance criteria — 9/9 tests pass, all imports clean
-  - Note: Used typing.Optional instead of dict|None for Python 3.9 compatibility
-[2026-04-01 14:52:45] All tasks pass. Issue #1 complete.
-[2026-04-01 14:53:48] Output summary: All 5 tasks implemented and verified:
+[2026-04-01 14:56:51] === AgentSquad Loop Started (max 15 iterations) ===
+[2026-04-01 14:56:51] --- Iteration 1 started ---
+[2026-04-01] Completed Tasks 1-4 in single iteration:
+  - Task 1: Added `search(query, limit, offset)` abstract method to `ItemRepository`, implemented in `MemoryRepository` with case-insensitive substring match on name/description
+  - Task 2: Updated `GET /items` endpoint with `q`, `limit`, `offset` query params, validation (400 for invalid/negative), response envelope `{items, total, limit, offset}`
+  - Task 3: Added 13 new tests covering search (name, description, case-insensitive, no match), pagination (limit, offset, beyond total, combined with search), and invalid params (non-integer, negative)
+  - Task 4: Verified all 22 tests pass (9 existing + 13 new), no regressions, all 7 acceptance criteria from issue #3 satisfied
+[2026-04-01] --- All tasks complete ---
+[2026-04-01 14:58:23] Output summary: All 4 tasks are complete. Summary of changes:
 
-- **repository.py** — `ItemRepository` ABC with `add`, `get`, `list_all`, `delete`
-- **memory_repo.py** — `MemoryRepository` with dict storage and UUID keys
-- **app.py** — Full CRUD endpoints under `/items` with proper status codes (201, 204, 404)
-- **test_app.py** — 9 tests all passing (health, empty list, create, get, get-404, delete, delete-404, get-after-delete, ABC-abstract check)
+- **repository.py**: Added `search(query, limit, offset) -> Tuple[list, int]` abstract method
+- **memory_repo.py**: Implemented `search()` with case-insensitive substring matching on name/description, limit/offset pagination
+- **app.py**: Updated `GET /items` to accept `q`, `limit`, `offset` query params with validation and response envelope `{items, total, limit, offset}`
+- **test_app.py**: 13 new tests (22 total, all passing) covering search, pagination, edge cases, and invalid params
 
 <promise>COMPLETE</promise>
-[2026-04-01 14:53:48] === BUILD COMPLETE - All tasks finished ===
+[2026-04-01 14:58:23] === BUILD COMPLETE - All tasks finished ===

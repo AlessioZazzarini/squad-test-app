@@ -1,6 +1,6 @@
 """In-memory implementation of the ItemRepository interface."""
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from repository import ItemRepository
 
@@ -27,3 +27,16 @@ class MemoryRepository(ItemRepository):
             del self._store[item_id]
             return True
         return False
+
+    def search(self, query: str, limit: int, offset: int) -> Tuple[list, int]:
+        query_lower = query.lower()
+        if query_lower:
+            matched = [
+                item for item in self._store.values()
+                if query_lower in item.get("name", "").lower()
+                or query_lower in item.get("description", "").lower()
+            ]
+        else:
+            matched = list(self._store.values())
+        total = len(matched)
+        return matched[offset:offset + limit], total

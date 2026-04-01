@@ -1,10 +1,10 @@
-# Task Plan - Issue #1: App skeleton: repository interface + in-memory CRUD + tests
+# Task Plan - Issue #3: Search and filter endpoint with pagination
 
-This file tracks implementation tasks for GitHub Issue #1.
+This file tracks implementation tasks for GitHub Issue #3.
 
-**Source:** https://github.com/AlessioZazzarini/squad-test-app/issues/1
+**Source:** https://github.com/AlessioZazzarini/squad-test-app/issues/3
 **Generated:** 2026-04-01
-**Estimated Total Complexity:** 2 small, 2 medium, 1 large
+**Estimated Total Complexity:** 1 small, 3 medium
 
 ## Tasks
 
@@ -12,117 +12,94 @@ This file tracks implementation tasks for GitHub Issue #1.
 [
   {
     "id": 1,
-    "category": "setup",
-    "epic": "App skeleton: repository interface + in-memory CRUD + tests",
-    "description": "Create abstract repository interface with add, get, list_all, and delete methods using Python ABC",
+    "category": "feature",
+    "epic": "Search and filter endpoint with pagination",
+    "description": "Add search/filter/paginate method to repository interface and implement in MemoryRepository",
     "steps": [
-      "Step 1: Create repository.py in the project root",
-      "Step 2: Define ItemRepository as an abstract base class (ABC)",
-      "Step 3: Add abstract methods: add(item) -> dict, get(item_id) -> dict, list_all() -> list, delete(item_id) -> bool",
-      "Step 4: Verify the module imports cleanly with python -c 'import repository'"
+      "Step 1: Add abstract method search(query, limit, offset) -> tuple[list, int] to ItemRepository in repository.py",
+      "Step 2: Implement search() in MemoryRepository — case-insensitive substring match on name and description fields",
+      "Step 3: Apply limit/offset pagination after filtering, return (paginated_items, total_matching_count)",
+      "Step 4: Verify with python -c 'from memory_repo import MemoryRepository; r = MemoryRepository(); print(r.search(\"\", 20, 0))'"
     ],
     "acceptance_criteria": [
-      "AC 1: repository.py exists with ItemRepository ABC class",
-      "AC 2: All four abstract methods are defined with proper signatures",
-      "AC 3: ItemRepository cannot be instantiated directly (raises TypeError)"
+      "AC 1: ItemRepository ABC has search(query, limit, offset) abstract method",
+      "AC 2: MemoryRepository.search returns matching items filtered case-insensitively on name/description",
+      "AC 3: Pagination via limit/offset works correctly and total reflects unfiltered match count",
+      "AC 4: Empty query string returns all items"
     ],
     "depends_on": [],
     "passes": true,
-    "github_issue": 1,
-    "estimated_complexity": "small"
+    "github_issue": 3,
+    "estimated_complexity": "medium"
   },
   {
     "id": 2,
     "category": "feature",
-    "epic": "App skeleton: repository interface + in-memory CRUD + tests",
-    "description": "Create in-memory repository implementation using a dict for storage that implements the ItemRepository interface",
+    "epic": "Search and filter endpoint with pagination",
+    "description": "Update GET /items endpoint with q/limit/offset query params, validation, and response envelope",
     "steps": [
-      "Step 1: Create memory_repo.py in the project root",
-      "Step 2: Implement MemoryRepository class extending ItemRepository",
-      "Step 3: Use a dict as internal storage with UUID-based auto-generated IDs",
-      "Step 4: Implement add() to store item and return it with generated ID",
-      "Step 5: Implement get(), list_all(), delete() methods",
-      "Step 6: Verify with python -c 'from memory_repo import MemoryRepository; r = MemoryRepository(); print(r.list_all())'"
+      "Step 1: Parse q, limit, offset query parameters from request.args in the list_items route",
+      "Step 2: Validate limit and offset are non-negative integers; return 400 JSON error if invalid",
+      "Step 3: Set defaults: limit=20, offset=0, q='' (empty string means no filter)",
+      "Step 4: Call repo.search(q, limit, offset) and return response envelope {items, total, limit, offset}",
+      "Step 5: Verify endpoint works with curl or python -c test"
     ],
     "acceptance_criteria": [
-      "AC 1: MemoryRepository implements all ItemRepository abstract methods",
-      "AC 2: add() generates a unique ID and returns the full item dict",
-      "AC 3: get() returns None or raises for missing IDs",
-      "AC 4: delete() returns True for existing items, False for missing"
+      "AC 1: GET /items returns {items: [], total: 0, limit: 20, offset: 0} when empty",
+      "AC 2: GET /items?q=test filters items by name/description match",
+      "AC 3: GET /items?limit=2&offset=0 paginates correctly",
+      "AC 4: Invalid limit/offset (negative, non-integer) returns 400 with error message",
+      "AC 5: App starts without errors"
     ],
     "depends_on": [1],
     "passes": true,
-    "github_issue": 1,
-    "estimated_complexity": "small"
+    "github_issue": 3,
+    "estimated_complexity": "medium"
   },
   {
     "id": 3,
-    "category": "feature",
-    "epic": "App skeleton: repository interface + in-memory CRUD + tests",
-    "description": "Add full CRUD endpoints to app.py under /items using the in-memory repository",
+    "category": "testing",
+    "epic": "Search and filter endpoint with pagination",
+    "description": "Write comprehensive pytest tests for search, pagination, edge cases, and invalid parameters",
     "steps": [
-      "Step 1: Import MemoryRepository and Flask helpers (request, jsonify) in app.py",
-      "Step 2: Instantiate a module-level MemoryRepository as the app's data store",
-      "Step 3: Add GET /items endpoint returning JSON list of all items",
-      "Step 4: Add POST /items endpoint accepting JSON body, returning created item with 201",
-      "Step 5: Add GET /items/<id> endpoint returning single item or 404",
-      "Step 6: Add DELETE /items/<id> endpoint returning 204 on success or 404"
+      "Step 1: Update test_app.py with tests for the new response envelope format on GET /items",
+      "Step 2: Add tests for search — q param matching name, description, case-insensitive",
+      "Step 3: Add tests for pagination — limit/offset with multiple items",
+      "Step 4: Add tests for edge cases — empty results, no q param returns all, offset beyond total",
+      "Step 5: Add tests for invalid params — non-integer limit, negative offset → 400",
+      "Step 6: Run pytest and verify all tests pass"
     ],
     "acceptance_criteria": [
-      "AC 1: GET /items returns [] initially",
-      "AC 2: POST /items with {name, description} returns created item with ID and 201 status",
-      "AC 3: GET /items/<id> returns the item or 404",
-      "AC 4: DELETE /items/<id> returns 204 or 404",
-      "AC 5: App starts without errors (python -c 'from app import app')"
+      "AC 1: Search filtering tested for name match, description match, and case insensitivity",
+      "AC 2: Pagination tested with limit=2 offset=0 and limit=2 offset=2",
+      "AC 3: Total count is correct regardless of pagination",
+      "AC 4: 400 errors tested for invalid limit/offset values",
+      "AC 5: pytest runs with all tests green (exit code 0)"
     ],
     "depends_on": [2],
     "passes": true,
-    "github_issue": 1,
+    "github_issue": 3,
     "estimated_complexity": "medium"
   },
   {
     "id": 4,
-    "category": "testing",
-    "epic": "App skeleton: repository interface + in-memory CRUD + tests",
-    "description": "Write comprehensive pytest tests covering all CRUD operations and edge cases",
+    "category": "polish",
+    "epic": "Search and filter endpoint with pagination",
+    "description": "Verify all 7 acceptance criteria from the GitHub issue pass end-to-end",
     "steps": [
-      "Step 1: Update test_app.py with imports and fixtures for the CRUD endpoints",
-      "Step 2: Write test for GET /items returning empty list",
-      "Step 3: Write test for POST /items creating an item successfully",
-      "Step 4: Write test for GET /items/<id> retrieving a created item",
-      "Step 5: Write test for DELETE /items/<id> removing an item and returning 204",
-      "Step 6: Write test for GET /items/<id> returning 404 after deletion",
-      "Step 7: Run pytest and verify all tests pass"
+      "Step 1: Run full pytest suite and confirm all tests pass",
+      "Step 2: Walk through each acceptance criterion from issue #3 manually",
+      "Step 3: Ensure existing CRUD tests still pass (no regressions)",
+      "Step 4: Ensure no import errors or lint issues"
     ],
     "acceptance_criteria": [
-      "AC 1: All CRUD operations have at least one test each",
-      "AC 2: 404 cases are tested for both GET and DELETE",
-      "AC 3: pytest runs with all tests green (exit code 0)"
+      "AC 1: All 7 acceptance criteria from GitHub issue #3 are satisfied",
+      "AC 2: pytest passes with zero failures",
+      "AC 3: Existing CRUD tests are not broken"
     ],
     "depends_on": [3],
     "passes": true,
-    "github_issue": 1,
-    "estimated_complexity": "medium"
-  },
-  {
-    "id": 5,
-    "category": "polish",
-    "epic": "App skeleton: repository interface + in-memory CRUD + tests",
-    "description": "Verify all acceptance criteria from the issue pass end-to-end and ensure clean code",
-    "steps": [
-      "Step 1: Run full pytest suite and confirm all tests pass",
-      "Step 2: Verify repository interface is abstract (cannot instantiate directly)",
-      "Step 3: Walk through each acceptance criterion from the issue manually",
-      "Step 4: Ensure no lint issues or import errors"
-    ],
-    "acceptance_criteria": [
-      "AC 1: All 7 acceptance criteria from the GitHub issue are satisfied",
-      "AC 2: pytest passes with zero failures",
-      "AC 3: All files import cleanly without errors"
-    ],
-    "depends_on": [4],
-    "passes": true,
-    "github_issue": 1,
+    "github_issue": 3,
     "estimated_complexity": "small"
   }
 ]

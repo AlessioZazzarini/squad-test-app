@@ -14,7 +14,21 @@ def health():
 
 @app.route("/items", methods=["GET"])
 def list_items():
-    return jsonify(repo.list_all())
+    q = request.args.get("q", "")
+    raw_limit = request.args.get("limit", "20")
+    raw_offset = request.args.get("offset", "0")
+
+    try:
+        limit = int(raw_limit)
+        offset = int(raw_offset)
+    except (ValueError, TypeError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+
+    if limit < 0 or offset < 0:
+        return jsonify({"error": "limit and offset must be non-negative"}), 400
+
+    items, total = repo.search(q, limit, offset)
+    return jsonify({"items": items, "total": total, "limit": limit, "offset": offset})
 
 
 @app.route("/items", methods=["POST"])

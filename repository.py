@@ -1,6 +1,6 @@
 """Abstract repository interface for item storage."""
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Tuple
 
 
 class ItemRepository(ABC):
@@ -19,4 +19,8 @@ class ItemRepository(ABC):
 
     @abstractmethod
     def delete(self, item_id: str) -> bool:
+        ...
+
+    @abstractmethod
+    def search(self, query: str, limit: int, offset: int) -> Tuple[list, int]:
         ...
