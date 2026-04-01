@@ -168,6 +168,34 @@ def test_list_items_offset_not_int(client):
     assert resp.status_code == 400
 
 
+# --- CORS ---
+
+def test_cors_headers_on_regular_request(client):
+    resp = client.get("/health", headers={"Origin": "http://example.com"})
+    assert resp.status_code == 200
+    assert resp.headers.get("Access-Control-Allow-Origin") == "http://example.com"
+
+
+def test_cors_preflight_options(client):
+    resp = client.options("/items", headers={
+        "Origin": "http://example.com",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Authorization,Content-Type",
+    })
+    assert resp.status_code == 200
+    assert "Access-Control-Allow-Origin" in resp.headers
+    assert "POST" in resp.headers.get("Access-Control-Allow-Methods", "")
+
+
+# --- Request Logging ---
+
+def test_request_logging(client, capsys):
+    client.get("/health")
+    captured = capsys.readouterr()
+    assert "GET /health" in captured.out
+    assert "ms" in captured.out
+
+
 # --- Global error handler ---
 
 def test_unhandled_exception_returns_json(client):
