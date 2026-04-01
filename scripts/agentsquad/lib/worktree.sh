@@ -2,7 +2,7 @@
 # worktree.sh — Git worktree management for AgentSquad parallel isolation
 #
 # Provides create_worktree, cleanup_worktree, and get_dep_branches helpers.
-# Designed to be sourced by orchestrate-parallel.sh and conductor.sh.
+# Designed to be sourced by conductor.sh.
 #
 # Requires: lib/config.sh sourced first (for AGENTSQUAD_MAIN_BRANCH)
 

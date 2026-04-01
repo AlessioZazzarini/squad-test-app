@@ -1,20 +1,27 @@
 #!/bin/bash
-# conductor.sh — Orchestration cycle operations for AgentSquad
+# conductor.sh — The single orchestration engine for AgentSquad
 #
-# Subcommands:
-#   status         — JSON summary of all tasks + workers
-#   finalize-all   — Push/PR for all ready-for-review tasks
-#   finalize <id>  — Push/PR for a specific task
-#   check-reviews  — Promote pr-created → review-ready when pr-review.md exists
-#   approve-ready  — Apply approval policy (manual/auto/paused) to review-ready tasks
-#   merge-approved — Merge approved tasks via close-task.sh
-#   cycle-summary  — Send cycle summary notification
-#   health         — Check worker health, report warnings/stuck
-#   spawn-next     — Find and spawn the next ready task
+# Usage:
+#   conductor.sh                   Single tick (default)
+#   conductor.sh --once            Single tick (explicit)
+#   conductor.sh --loop 3m         Continuous tick (interval: Nm or Ns)
+#   conductor.sh --dry-run         Preview only, no changes
+#   conductor.sh status            JSON summary of all tasks + workers
+#   conductor.sh finalize <id>     Finalize a specific task (push + PR)
+#   conductor.sh health            Health check all workers
+#
+# The tick function runs these steps in order:
+#   1. Finalize completed workers (push + PR)
+#   2. Check review artifacts (pr-review.md)
+#   3. Apply approval policy (manual/auto/paused)
+#   4. Merge approved tasks
+#   5. Health check active workers
+#   6. Spawn workers until at capacity or no ready tasks
+#   7. Send cycle summary notification
 
 set -euo pipefail
 
-# Source config
+# ── Source shared libs ───────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -25,23 +32,66 @@ if [ -f "$SCRIPT_DIR/lib/worktree.sh" ]; then
   source "$SCRIPT_DIR/lib/worktree.sh"
 fi
 
+# ── Configuration ────────────────────────────────────────────
 TASKS_DIR="${AGENTSQUAD_TASKS_DIR:-.tasks}"
 MAX_WORKERS="${AGENTSQUAD_MAX_WORKERS:-3}"
 MAIN_BRANCH="${AGENTSQUAD_MAIN_BRANCH:-main}"
 SESSION="${AGENTSQUAD_TMUX_SESSION:-$(basename "$PROJECT_ROOT")}"
 CONFIG_FILE="$PROJECT_ROOT/.claude/agentsquad.json"
+LOCK_FILE="$PROJECT_ROOT/$TASKS_DIR/.conductor.lock"
 
-# --- Helpers ---
+# ── Parse arguments ──────────────────────────────────────────
+MODE="once"
+INTERVAL_SECONDS=""
+DRY_RUN=false
+SUBCMD=""
+SUBCMD_ARG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --once)
+      MODE="once"; shift ;;
+    --loop)
+      MODE="loop"
+      # Parse interval: Nm for minutes, Ns for seconds, plain number = seconds
+      local_interval="${2:-5m}"
+      if [[ "$local_interval" =~ ^([0-9]+)m$ ]]; then
+        INTERVAL_SECONDS=$(( ${BASH_REMATCH[1]} * 60 ))
+      elif [[ "$local_interval" =~ ^([0-9]+)s$ ]]; then
+        INTERVAL_SECONDS="${BASH_REMATCH[1]}"
+      elif [[ "$local_interval" =~ ^[0-9]+$ ]]; then
+        INTERVAL_SECONDS="$local_interval"
+      else
+        echo "ERROR: Invalid interval '$local_interval'. Use Nm (minutes) or Ns (seconds)." >&2
+        exit 1
+      fi
+      shift 2 ;;
+    --dry-run)
+      DRY_RUN=true; shift ;;
+    status|health)
+      SUBCMD="$1"; shift; break ;;
+    finalize)
+      SUBCMD="finalize"; SUBCMD_ARG="${2:-}"; shift; shift 2>/dev/null || true; break ;;
+    -*)
+      echo "Unknown flag: $1" >&2; exit 1 ;;
+    *)
+      shift ;;
+  esac
+done
+
+# ── Logging ──────────────────────────────────────────────────
+log() {
+  echo "[$(date '+%H:%M:%S')] $1"
+}
+
+# ── Helpers ──────────────────────────────────────────────────
 
 # Cross-platform epoch conversion (macOS + Linux)
-# Usage: parse_epoch "2026-04-01T12:00:00Z"
 parse_epoch() {
   local ts="$1"
-  # Strip trailing Z and fractional seconds for macOS compatibility
   local clean="${ts%%Z}"
   clean="${clean%%.*}"
 
-  # Try GNU date first (Linux), then BSD date (macOS)
   if date -d "$ts" +%s 2>/dev/null; then
     return
   elif date -j -f "%Y-%m-%dT%H:%M:%S" "$clean" +%s 2>/dev/null; then
@@ -51,7 +101,107 @@ parse_epoch() {
   fi
 }
 
-# --- Subcommands ---
+# Check if all dependencies are met for a task
+check_deps_met() {
+  local task_id="$1"
+  local status_file="$PROJECT_ROOT/$TASKS_DIR/$task_id/status.json"
+
+  local deps
+  deps=$(jq -r '.dependencies // [] | .[]' "$status_file" 2>/dev/null || true)
+  for dep in $deps; do
+    [ -z "$dep" ] && continue
+    local dep_file="$PROJECT_ROOT/$TASKS_DIR/$dep/status.json"
+    if [ ! -f "$dep_file" ]; then
+      return 1
+    fi
+    local dep_status
+    dep_status=$(jq -r '.status // "unknown"' "$dep_file")
+    if [ "$dep_status" = "blocked" ] || [ "$dep_status" = "failed" ]; then
+      # Cascade blocking
+      echo "blocked"
+      return 1
+    fi
+    if [ "$dep_status" != "pr-created" ] && [ "$dep_status" != "complete" ] && \
+       [ "$dep_status" != "review-ready" ] && [ "$dep_status" != "approved" ] && \
+       [ "$dep_status" != "merged" ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# ── Tick locking (flock) ─────────────────────────────────────
+acquire_tick_lock() {
+  mkdir -p "$(dirname "$LOCK_FILE")"
+  exec 200>"$LOCK_FILE"
+  if ! flock -n 200; then
+    echo "Another conductor tick is running. Skipping." >&2
+    exit 0
+  fi
+}
+
+release_tick_lock() {
+  flock -u 200 2>/dev/null || true
+  rm -f "$LOCK_FILE"
+}
+
+# ── Approval helpers ─────────────────────────────────────────
+
+# Read the approval mode: per-task override > global config > "manual"
+get_approval_mode() {
+  local task_id="$1"
+  local status_file="$PROJECT_ROOT/$TASKS_DIR/$task_id/status.json"
+
+  # Per-task override
+  local task_mode
+  task_mode=$(jq -r '.approval_mode // empty' "$status_file" 2>/dev/null)
+  if [ -n "$task_mode" ]; then
+    echo "$task_mode"
+    return
+  fi
+
+  # Global config
+  if [ -f "$CONFIG_FILE" ]; then
+    local global_mode
+    global_mode=$(jq -r '.approval.default // empty' "$CONFIG_FILE" 2>/dev/null)
+    if [ -n "$global_mode" ]; then
+      echo "$global_mode"
+      return
+    fi
+  fi
+
+  echo "manual"
+}
+
+# Read sensitive_paths from config, return newline-separated list
+get_sensitive_paths() {
+  if [ -f "$CONFIG_FILE" ]; then
+    jq -r '.approval.auto_merge.sensitive_paths // [] | .[]' "$CONFIG_FILE" 2>/dev/null
+  fi
+}
+
+# Check if any changed files match sensitive paths
+has_sensitive_changes() {
+  local branch="$1"
+  local sensitive_paths
+  sensitive_paths=$(get_sensitive_paths)
+  [ -z "$sensitive_paths" ] && return 1
+
+  local changed_files
+  changed_files=$(cd "$PROJECT_ROOT" && git diff --name-only "$MAIN_BRANCH...$branch" 2>/dev/null)
+  [ -z "$changed_files" ] && return 1
+
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    if echo "$changed_files" | grep -q "$pattern"; then
+      return 0
+    fi
+  done <<< "$sensitive_paths"
+
+  return 1
+}
+
+# ── Subcommands (used both standalone and inside tick) ───────
 
 cmd_status() {
   local active=0 completed=0 queued=0 blocked=0 review_ready=0 approved=0 merged=0
@@ -144,6 +294,11 @@ cmd_finalize() {
     return 1
   fi
 
+  if [ "$DRY_RUN" = true ]; then
+    log "[DRY-RUN] Would finalize $task_id (branch: $branch)"
+    return 0
+  fi
+
   echo "Finalizing $task_id (branch: $branch)..."
 
   # Push branch
@@ -180,7 +335,6 @@ cmd_finalize() {
     bash "$SCRIPT_DIR/update-status.sh" "$task_id" pr_url "$pr_url"
   else
     echo "ERROR: No valid PR URL obtained for $task_id (got: ${pr_url:-empty})" >&2
-    # Leave status at ready-for-review — do not promote to pr-created
     return 1
   fi
 
@@ -212,6 +366,13 @@ cmd_finalize_all() {
 
     local task_id
     task_id=$(basename "$(dirname "$status_file")")
+
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY-RUN] Would finalize $task_id"
+      found=$((found + 1))
+      continue
+    fi
+
     cmd_finalize "$task_id"
     found=$((found + 1))
   done
@@ -221,7 +382,7 @@ cmd_finalize_all() {
   else
     echo "Finalized $found task(s)."
     # Clean up any remaining worktrees after finalization
-    if [ -d "$PROJECT_ROOT/$TASKS_DIR/worktrees" ]; then
+    if [ "$DRY_RUN" = false ] && [ -d "$PROJECT_ROOT/$TASKS_DIR/worktrees" ]; then
       for wt_dir in "$PROJECT_ROOT/$TASKS_DIR/worktrees"/*/; do
         [ -d "$wt_dir" ] || continue
         local wt_task_id
@@ -231,182 +392,6 @@ cmd_finalize_all() {
       rmdir "$PROJECT_ROOT/$TASKS_DIR/worktrees" 2>/dev/null || true
     fi
   fi
-}
-
-cmd_health() {
-  local now
-  now=$(date +%s)
-  local found=0
-
-  for status_file in "$PROJECT_ROOT/$TASKS_DIR"/*/status.json; do
-    [ -f "$status_file" ] || continue
-    local status
-    status=$(jq -r '.status // "unknown"' "$status_file")
-
-    # Only check active statuses
-    case "$status" in
-      in_progress|implementing|testing-local|investigating) ;;
-      *) continue ;;
-    esac
-
-    local task_id
-    task_id=$(basename "$(dirname "$status_file")")
-    local updated_at
-    updated_at=$(jq -r '.updated_at // empty' "$status_file")
-
-    local age=0
-    if [ -n "$updated_at" ]; then
-      local updated_epoch
-      updated_epoch=$(parse_epoch "$updated_at")
-      if [ "$updated_epoch" -gt 0 ] 2>/dev/null; then
-        age=$((now - updated_epoch))
-      fi
-    fi
-
-    local age_min=$((age / 60))
-
-    if [ "$age" -gt 2700 ]; then  # 45 min
-      echo "STUCK: $task_id (${age_min}m since update, status=$status)"
-    elif [ "$age" -gt 1200 ]; then  # 20 min
-      echo "WARNING: $task_id (${age_min}m since update, status=$status)"
-    else
-      echo "OK: $task_id (${age_min}m since update, status=$status)"
-    fi
-    found=$((found + 1))
-  done
-
-  if [ "$found" -eq 0 ]; then
-    echo "No active workers."
-  fi
-}
-
-cmd_spawn_next() {
-  # Count active workers
-  local active
-  active=$(bash "$SCRIPT_DIR/check-workers.sh" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
-
-  if [ "$active" -ge "$MAX_WORKERS" ]; then
-    echo "At capacity ($active/$MAX_WORKERS workers active)"
-    return 0
-  fi
-
-  # Find next ready task (with strengthened dependency check)
-  for status_file in "$PROJECT_ROOT/$TASKS_DIR"/*/status.json; do
-    [ -f "$status_file" ] || continue
-    local status
-    status=$(jq -r '.status // "unknown"' "$status_file")
-    [ "$status" = "ready" ] || continue
-
-    local task_id
-    task_id=$(basename "$(dirname "$status_file")")
-
-    # Strengthened dependency check with cascade blocking
-    local deps_met=true
-    local should_block=false
-    local deps
-    deps=$(jq -r '.dependencies // [] | .[]' "$status_file" 2>/dev/null || true)
-    for dep in $deps; do
-      [ -z "$dep" ] && continue
-      local dep_file="$PROJECT_ROOT/$TASKS_DIR/$dep/status.json"
-      if [ ! -f "$dep_file" ]; then
-        # Dep status.json doesn't exist — dep NOT met
-        deps_met=false
-        break
-      fi
-      local dep_status
-      dep_status=$(jq -r '.status // "unknown"' "$dep_file")
-      if [ "$dep_status" = "blocked" ] || [ "$dep_status" = "failed" ]; then
-        # Cascade: mark this task as blocked
-        should_block=true
-        deps_met=false
-        break
-      fi
-      if [ "$dep_status" != "pr-created" ] && [ "$dep_status" != "complete" ] && [ "$dep_status" != "review-ready" ] && [ "$dep_status" != "approved" ] && [ "$dep_status" != "merged" ]; then
-        deps_met=false
-        break
-      fi
-    done
-
-    if [ "$should_block" = true ]; then
-      echo "Blocking $task_id (dependency blocked/failed)"
-      bash "$SCRIPT_DIR/update-status.sh" "$task_id" status "blocked" 2>/dev/null || true
-      continue
-    fi
-
-    if [ "$deps_met" = false ]; then
-      continue
-    fi
-
-    # Create worktree before spawning
-    local branch="task/$task_id"
-    local wt_path
-    wt_path=$(cd "$PROJECT_ROOT" && create_worktree "$task_id" "$branch") || {
-      echo "ERROR: Failed to create worktree for $task_id" >&2
-      continue
-    }
-
-    echo "Spawning: $task_id (worktree: $wt_path)"
-    AGENTSQUAD_WORKDIR="$PROJECT_ROOT/$wt_path" bash "$SCRIPT_DIR/spawn-worker.sh" "$task_id"
-    return 0
-  done
-
-  echo "No ready tasks"
-}
-
-# --- Approval helpers ---
-
-# Read the approval mode: per-task override > global config > "manual"
-get_approval_mode() {
-  local task_id="$1"
-  local status_file="$PROJECT_ROOT/$TASKS_DIR/$task_id/status.json"
-
-  # Per-task override
-  local task_mode
-  task_mode=$(jq -r '.approval_mode // empty' "$status_file" 2>/dev/null)
-  if [ -n "$task_mode" ]; then
-    echo "$task_mode"
-    return
-  fi
-
-  # Global config
-  if [ -f "$CONFIG_FILE" ]; then
-    local global_mode
-    global_mode=$(jq -r '.approval.default // empty' "$CONFIG_FILE" 2>/dev/null)
-    if [ -n "$global_mode" ]; then
-      echo "$global_mode"
-      return
-    fi
-  fi
-
-  echo "manual"
-}
-
-# Read sensitive_paths from config, return newline-separated list
-get_sensitive_paths() {
-  if [ -f "$CONFIG_FILE" ]; then
-    jq -r '.approval.auto_merge.sensitive_paths // [] | .[]' "$CONFIG_FILE" 2>/dev/null
-  fi
-}
-
-# Check if any changed files match sensitive paths
-has_sensitive_changes() {
-  local branch="$1"
-  local sensitive_paths
-  sensitive_paths=$(get_sensitive_paths)
-  [ -z "$sensitive_paths" ] && return 1
-
-  local changed_files
-  changed_files=$(cd "$PROJECT_ROOT" && git diff --name-only "$MAIN_BRANCH...$branch" 2>/dev/null)
-  [ -z "$changed_files" ] && return 1
-
-  while IFS= read -r pattern; do
-    [ -z "$pattern" ] && continue
-    if echo "$changed_files" | grep -q "$pattern"; then
-      return 0
-    fi
-  done <<< "$sensitive_paths"
-
-  return 1
 }
 
 cmd_check_reviews() {
@@ -423,6 +408,12 @@ cmd_check_reviews() {
     local review_file="$PROJECT_ROOT/$TASKS_DIR/$task_id/pr-review.md"
 
     if [ -f "$review_file" ]; then
+      if [ "$DRY_RUN" = true ]; then
+        log "[DRY-RUN] Would promote $task_id to review-ready"
+        found=$((found + 1))
+        continue
+      fi
+
       bash "$SCRIPT_DIR/update-status.sh" "$task_id" status "review-ready"
       bash "$SCRIPT_DIR/notify.sh" "$(printf '\xF0\x9F\x93\x8B') *${task_id}* ready for review — see pr-review.md" 2>/dev/null || true
       echo "Review ready: $task_id"
@@ -477,6 +468,12 @@ cmd_approve_ready() {
           continue
         fi
 
+        if [ "$DRY_RUN" = true ]; then
+          log "[DRY-RUN] Would auto-approve $task_id (PR #$pr_number)"
+          found=$((found + 1))
+          continue
+        fi
+
         # Check sensitive paths
         if [ -n "$branch" ] && has_sensitive_changes "$branch"; then
           echo "Sensitive paths changed: $task_id — forcing manual review"
@@ -486,13 +483,11 @@ cmd_approve_ready() {
         # Check CI status
         local ci_ok=true
         if ! (cd "$PROJECT_ROOT" && gh pr checks "$pr_number" --required 2>&1 | grep -q "pass\|All checks were successful") 2>/dev/null; then
-          # Check if there are any failing required checks
           local checks_output
           checks_output=$(cd "$PROJECT_ROOT" && gh pr checks "$pr_number" --required 2>&1 || true)
           if echo "$checks_output" | grep -qi "fail\|error"; then
             ci_ok=false
           fi
-          # If no required checks exist, that's fine — pass through
         fi
 
         if [ "$ci_ok" = true ]; then
@@ -530,6 +525,12 @@ cmd_merge_approved() {
     pr_url=$(jq -r '.pr_url // empty' "$status_file")
     local pr_number
     pr_number=$(echo "$pr_url" | grep -o '[0-9]*$' || echo "")
+
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY-RUN] Would merge $task_id (PR #${pr_number:-?})"
+      found=$((found + 1))
+      continue
+    fi
 
     echo "Merging $task_id..."
 
@@ -571,6 +572,125 @@ cmd_merge_approved() {
 
   if [ "$found" -eq 0 ]; then
     echo "No tasks merged this cycle."
+  fi
+}
+
+cmd_health() {
+  local now
+  now=$(date +%s)
+  local found=0
+
+  for status_file in "$PROJECT_ROOT/$TASKS_DIR"/*/status.json; do
+    [ -f "$status_file" ] || continue
+    local status
+    status=$(jq -r '.status // "unknown"' "$status_file")
+
+    # Only check active statuses
+    case "$status" in
+      in_progress|implementing|testing-local|investigating) ;;
+      *) continue ;;
+    esac
+
+    local task_id
+    task_id=$(basename "$(dirname "$status_file")")
+    local updated_at
+    updated_at=$(jq -r '.updated_at // empty' "$status_file")
+
+    local age=0
+    if [ -n "$updated_at" ]; then
+      local updated_epoch
+      updated_epoch=$(parse_epoch "$updated_at")
+      if [ "$updated_epoch" -gt 0 ] 2>/dev/null; then
+        age=$((now - updated_epoch))
+      fi
+    fi
+
+    local age_min=$((age / 60))
+
+    if [ "$age" -gt 2700 ]; then  # 45 min
+      echo "STUCK: $task_id (${age_min}m since update, status=$status)"
+    elif [ "$age" -gt 1200 ]; then  # 20 min
+      echo "WARNING: $task_id (${age_min}m since update, status=$status)"
+    else
+      echo "OK: $task_id (${age_min}m since update, status=$status)"
+    fi
+    found=$((found + 1))
+  done
+
+  if [ "$found" -eq 0 ]; then
+    echo "No active workers."
+  fi
+}
+
+cmd_spawn_all() {
+  local spawned=0
+
+  while true; do
+    # Count active workers
+    local active
+    active=$(bash "$SCRIPT_DIR/check-workers.sh" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+
+    if [ "$active" -ge "$MAX_WORKERS" ]; then
+      log "At capacity ($active/$MAX_WORKERS workers)"
+      break
+    fi
+
+    # Find next ready task with all deps met
+    local next=""
+    for sf in "$PROJECT_ROOT/$TASKS_DIR"/*/status.json; do
+      [ -f "$sf" ] || continue
+      local s
+      s=$(jq -r '.status // "unknown"' "$sf")
+      [ "$s" = "ready" ] || continue
+
+      local tid
+      tid=$(basename "$(dirname "$sf")")
+
+      # Check dependencies
+      local dep_result
+      dep_result=$(check_deps_met "$tid" 2>&1) || {
+        if [ "$dep_result" = "blocked" ]; then
+          if [ "$DRY_RUN" = true ]; then
+            log "[DRY-RUN] Would block $tid (dependency blocked/failed)"
+          else
+            echo "Blocking $tid (dependency blocked/failed)"
+            bash "$SCRIPT_DIR/update-status.sh" "$tid" status "blocked" 2>/dev/null || true
+          fi
+        fi
+        continue
+      }
+
+      next="$tid"
+      break
+    done
+
+    if [ -z "$next" ]; then
+      log "No more ready tasks with deps met"
+      break
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY-RUN] Would spawn worker for $next"
+      ((spawned++))
+      # In dry-run, break after first to avoid infinite loop (no actual state change)
+      break
+    fi
+
+    # Create worktree and spawn
+    local branch="task/$next"
+    local wt_path
+    wt_path=$(cd "$PROJECT_ROOT" && create_worktree "$next" "$branch") || {
+      echo "ERROR: Failed to create worktree for $next" >&2
+      continue
+    }
+
+    echo "Spawning: $next (worktree: $wt_path)"
+    AGENTSQUAD_WORKDIR="$PROJECT_ROOT/$wt_path" bash "$SCRIPT_DIR/spawn-worker.sh" "$next"
+    ((spawned++))
+  done
+
+  if [ "$spawned" -gt 0 ]; then
+    log "Spawned $spawned worker(s)"
   fi
 }
 
@@ -628,45 +748,101 @@ EOF
   )
 
   echo "$summary"
-  bash "$SCRIPT_DIR/notify.sh" "$summary" 2>/dev/null || true
+
+  if [ "$DRY_RUN" = false ]; then
+    bash "$SCRIPT_DIR/notify.sh" "$summary" 2>/dev/null || true
+  fi
 }
 
-# --- Main dispatch ---
+# ── The tick ─────────────────────────────────────────────────
+run_tick() {
+  log "=== Conductor tick started ==="
 
-case "${1:-}" in
-  status)
-    cmd_status
-    ;;
-  finalize-all)
-    cmd_finalize_all
-    ;;
-  finalize)
-    if [ -z "${2:-}" ]; then
-      echo "Usage: conductor.sh finalize <task-id>" >&2
-      exit 1
+  log "--- Step 1: Finalize completed workers ---"
+  cmd_finalize_all
+
+  log "--- Step 2: Check review artifacts ---"
+  cmd_check_reviews
+
+  log "--- Step 3: Apply approval policy ---"
+  cmd_approve_ready
+
+  log "--- Step 4: Merge approved tasks ---"
+  cmd_merge_approved
+
+  log "--- Step 5: Health check ---"
+  local health_output
+  health_output=$(cmd_health)
+  echo "$health_output"
+
+  # Handle stuck workers (kill tmux window, mark blocked)
+  echo "$health_output" | grep "^STUCK:" | while read -r line; do
+    local stuck_task
+    stuck_task=$(echo "$line" | awk '{print $2}')
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY-RUN] Would kill stuck worker: $stuck_task"
+    else
+      local window_name="task-${stuck_task}"
+      tmux kill-window -t "${SESSION}:${window_name}" 2>/dev/null || true
+      bash "$SCRIPT_DIR/update-status.sh" "$stuck_task" status "blocked" 2>/dev/null || true
+      bash "$SCRIPT_DIR/update-status.sh" "$stuck_task" blocked_reason "stuck — no status update for 45+ minutes" 2>/dev/null || true
+      log "Killed stuck worker: $stuck_task"
     fi
-    cmd_finalize "$2"
+  done
+
+  log "--- Step 6: Spawn workers ---"
+  cmd_spawn_all
+
+  log "--- Step 7: Cycle summary ---"
+  cmd_cycle_summary
+
+  log "=== Conductor tick completed ==="
+}
+
+# ── Loop mode ────────────────────────────────────────────────
+run_loop() {
+  log "Conductor loop started (interval: ${INTERVAL_SECONDS}s)"
+
+  trap 'log "Conductor stopped"; release_tick_lock; exit 0' INT TERM
+
+  while true; do
+    acquire_tick_lock
+    run_tick
+    release_tick_lock
+    sleep "$INTERVAL_SECONDS"
+  done
+}
+
+# ── Main dispatch ────────────────────────────────────────────
+
+# Handle standalone subcommands first
+if [ -n "$SUBCMD" ]; then
+  case "$SUBCMD" in
+    status)
+      cmd_status
+      ;;
+    finalize)
+      if [ -z "$SUBCMD_ARG" ]; then
+        echo "Usage: conductor.sh finalize <task-id>" >&2
+        exit 1
+      fi
+      cmd_finalize "$SUBCMD_ARG"
+      ;;
+    health)
+      cmd_health
+      ;;
+  esac
+  exit 0
+fi
+
+# Handle run modes
+case "$MODE" in
+  once)
+    acquire_tick_lock
+    run_tick
+    release_tick_lock
     ;;
-  check-reviews)
-    cmd_check_reviews
-    ;;
-  approve-ready)
-    cmd_approve_ready
-    ;;
-  merge-approved)
-    cmd_merge_approved
-    ;;
-  cycle-summary)
-    cmd_cycle_summary
-    ;;
-  health)
-    cmd_health
-    ;;
-  spawn-next)
-    cmd_spawn_next
-    ;;
-  *)
-    echo "Usage: conductor.sh <status|finalize-all|finalize <id>|check-reviews|approve-ready|merge-approved|cycle-summary|health|spawn-next>" >&2
-    exit 1
+  loop)
+    run_loop
     ;;
 esac

@@ -1,6 +1,6 @@
-# /orchestrate — Multi-Issue Task Orchestration
+# /orchestrate — Triage GitHub Issues into the Task Queue
 
-Orchestrate multiple GitHub issues through the autonomous worker pipeline with label-based state management.
+Fetch GitHub issues, parse dependencies, create task directories, then hand off to the Conductor for execution.
 
 ## GitHub Labels
 
@@ -27,36 +27,41 @@ The following labels track task state (create them if missing):
 
 3. **Determine execution order.** Issues with no unresolved dependencies go first. Group by priority label if present.
 
-4. **Label queued issues:**
+4. **Create task directories.** For each issue, create `.tasks/<task-id>/` with `status.json` (status: ready) and `acceptance-criteria.md`.
+
+5. **Label queued issues:**
    ```bash
    gh issue edit <number> --add-label "squad:queued" --remove-label "squad:ready"
    ```
 
-### Phase 2: Generate Manifest
+### Phase 2: Hand Off to Conductor
 
-Generate `.tasks/orchestration-manifest.json` with the triaged issues, their dependencies, priorities, and initial status of `queued`.
-
-### Phase 3: Run Parallel Orchestration
-
-Delegate all spawning, worktree isolation, push, and PR creation to the canonical orchestration script:
+Delegate all execution to the Conductor:
 
 ```bash
-bash scripts/agentsquad/orchestrate-parallel.sh <max_iterations>
+bash scripts/agentsquad/conductor.sh --once
 ```
 
-This script handles:
-- Git worktree isolation per worker (no shared working directories)
-- Wave-based parallel execution respecting dependency order
-- Commit, push, and PR creation for each completed task
-- Label updates (`squad:in-progress`, `squad:complete`, `squad:failed`)
-- Crash recovery and resume from manifest state
+The Conductor handles:
+- Git worktree isolation per worker
+- Spawning workers up to MAX_WORKERS
+- Push and PR creation for completed tasks
+- Approval policy (manual/auto/paused)
+- Merge of approved tasks
+- Health monitoring (warn/kill stuck workers)
+- Cycle summary notifications
 
-**Do NOT reimplement spawning, worktree, push, or PR logic here.** The parallel script is the single canonical path.
+**Do NOT reimplement spawning, worktree, push, or PR logic here.** The Conductor is the single canonical execution engine.
+
+For continuous operation:
+```bash
+bash scripts/agentsquad/conductor.sh --loop 3m
+```
 
 ## Rules
 
 - **Fresh Claude session per issue** — never reuse a worker window (prevents context rot)
-- **Two-phase orchestration** — triage ALL issues before spawning ANY workers
+- **Two-phase workflow** — triage ALL issues before handing off to the Conductor
 - **Max 3 concurrent workers** unless overridden by `AGENTSQUAD_MAX_WORKERS`
 - **Topological sort** for dependencies — cycle detection is mandatory
 - **Label hygiene** — always update labels on state transitions
@@ -69,6 +74,6 @@ depends-on: #42
 depends-on: #43
 ```
 
-Issues with unresolved dependencies stay in `squad:queued` until their dependencies reach `squad:complete`.
+Issues with unresolved dependencies stay in `squad:queued` until their dependencies reach a completed status.
 
 $ARGUMENTS

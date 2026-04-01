@@ -1,0 +1,16 @@
+{
+  "task_id": "issue-15",
+  "kind": "feature",
+  "status": "ready",
+  "priority": "P1",
+  "complexity": "medium",
+  "type": "implement",
+  "branch": "",
+  "github_issue": 15,
+  "title": "Add item tags with many-to-many relationship",
+  "pr_url": "",
+  "attempts": 0,
+  "max_iterations": 15,
+  "dependencies": [14],
+  "updated_at": "2026-04-01T18:27:22Z"
+}

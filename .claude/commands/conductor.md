@@ -1,137 +1,147 @@
 ---
-description: "Run one orchestration cycle: finalize completed workers, check health, spawn new workers"
+description: "Run the Conductor — the single orchestration engine for AgentSquad"
 ---
 
-# /conductor — Run One Orchestration Cycle
+# /conductor — Run the Orchestration Engine
 
-Run a single conductor cycle. Can be invoked manually or via `/loop 5m /conductor` for continuous operation.
+The Conductor is AgentSquad's single orchestration engine. It runs an idempotent tick that manages the full task lifecycle: finalize, review, approve, merge, health check, and spawn.
+
+## Run Modes
+
+```bash
+# Single tick (default — run once, exit)
+bash scripts/agentsquad/conductor.sh
+bash scripts/agentsquad/conductor.sh --once
+
+# Continuous mode (tick every N minutes/seconds)
+bash scripts/agentsquad/conductor.sh --loop 3m
+bash scripts/agentsquad/conductor.sh --loop 30s
+
+# Dry-run (preview what would happen, no changes)
+bash scripts/agentsquad/conductor.sh --dry-run
+
+# Standalone subcommands
+bash scripts/agentsquad/conductor.sh status           # JSON summary
+bash scripts/agentsquad/conductor.sh finalize <id>     # Finalize specific task
+bash scripts/agentsquad/conductor.sh health            # Health check workers
+```
+
+### From Claude Code
+
+```bash
+# Manual single tick
+/conductor
+
+# Continuous (via /loop command)
+/loop 5m /conductor
+```
+
+## The Tick
+
+Every tick runs these 7 steps in order:
+
+| Step | Function | What it does |
+|------|----------|-------------|
+| 1 | `cmd_finalize_all` | Find `ready-for-review` tasks, push branch, create PR, set `pr-created` |
+| 2 | `cmd_check_reviews` | Find `pr-created` tasks with `pr-review.md`, promote to `review-ready` |
+| 3 | `cmd_approve_ready` | Apply approval policy (manual/auto/paused) to `review-ready` tasks |
+| 4 | `cmd_merge_approved` | Merge `approved` tasks via `close-task.sh` or `gh pr merge` |
+| 5 | `cmd_health` | Check worker health: OK (<20m), WARNING (20-45m), STUCK (>45m). Kill stuck workers. |
+| 6 | `cmd_spawn_all` | Loop: spawn workers until at capacity (MAX_WORKERS) or no ready tasks with deps met |
+| 7 | `cmd_cycle_summary` | Send notification summary of full cycle |
+
+### Tick Locking
+
+Only one tick runs at a time, enforced via `flock`. If a second invocation arrives while a tick is running, it exits silently. Safe for concurrent `/loop` and manual `/conductor` calls.
+
+## Approval Modes
+
+| Mode | Who approves | When to use |
+|------|-------------|-------------|
+| `manual` (default) | Human reviews PR, then `update-status.sh <id> status approved` | Production repos |
+| `auto` | Conductor auto-approves after CI green + sensitive paths check | Trusted repos |
+| `paused` | Nobody — all merges halted | Emergencies, code freezes |
+
+Configure globally in `.claude/agentsquad.json`:
+```json
+{ "approval": { "default": "manual" } }
+```
+
+Per-task override: set `approval_mode` in `status.json`.
+
+## Dry-Run Mode
+
+Every step checks `$DRY_RUN` and logs what it WOULD do without making changes:
+
+```
+[14:30:00] === Conductor tick started ===
+[14:30:00] --- Step 1: Finalize completed workers ---
+[14:30:00] [DRY-RUN] Would finalize issue-42
+[14:30:00] --- Step 6: Spawn workers ---
+[14:30:00] [DRY-RUN] Would spawn worker for issue-45
+[14:30:00] === Conductor tick completed ===
+```
 
 ## Workflow
 
 ### Step 1: Pre-flight
-- Verify tmux session exists (use AGENTSQUAD_TMUX_SESSION or basename of pwd)
-- Read .claude/agentsquad.json for config
-- If no .tasks/ directory, report and exit
+- Verify `.tasks/` directory exists
+- Read `.claude/agentsquad.json` for config (approval mode, max workers, etc.)
 
 ```bash
-SESSION="${AGENTSQUAD_TMUX_SESSION:-$(basename "$(pwd)")}"
-if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-    echo "ERROR: tmux session '$SESSION' not found"
-    exit 1
-fi
-if [ ! -d ".tasks" ]; then
-    echo "No .tasks/ directory — nothing to orchestrate."
-    exit 0
-fi
+bash scripts/agentsquad/conductor.sh --once
 ```
 
-### Step 2: Finalize completed workers
+### Step 2: Report Results
 
-Run: `bash scripts/agentsquad/conductor.sh finalize-all`
-
-This finds all tasks with status "ready-for-review" and for each one:
-- Pushes the branch to origin
-- Creates a PR (idempotent — skips if one already exists)
-- Updates GitHub labels (squad:in-progress -> squad:complete)
-- Cleans the worktree
-- Updates task status to "pr-created"
-
-Report what was finalized.
-
-### Step 3: Check review artifacts
-
-Run: `bash scripts/agentsquad/conductor.sh check-reviews`
-
-This finds all tasks with status "pr-created" and checks if `.tasks/<task-id>/pr-review.md` exists. If yes, promotes the task to "review-ready" and sends a notification.
-
-### Step 4: Apply approval policy
-
-Run: `bash scripts/agentsquad/conductor.sh approve-ready`
-
-For tasks with status "review-ready", reads the approval mode (per-task override or global config default):
-- **manual**: do nothing — wait for human to set "approved" via update-status.sh
-- **auto**: check CI status (`gh pr checks`) + sensitive paths policy. If all gates pass, set "approved".
-- **paused**: do nothing — global kill switch, no merges.
-
-### Step 5: Merge approved tasks
-
-Run: `bash scripts/agentsquad/conductor.sh merge-approved`
-
-For tasks with status "approved":
-- Runs `close-task.sh` (squash-merge + issue close + archive)
-- Sets status to "merged" on success
-- Leaves status at "approved" on failure
-
-### Step 6: Health check
-
-Run: `bash scripts/agentsquad/conductor.sh health`
-
-This checks each active worker and reports:
-- **OK** — updated within last 20 minutes
-- **WARNING** — no update for 20-45 minutes
-- **STUCK** — no update for 45+ minutes
-
-For stuck workers: kill the tmux window, mark status "blocked" with reason "stuck — no update for N minutes".
-
-```bash
-HEALTH_OUTPUT=$(bash scripts/agentsquad/conductor.sh health)
-echo "$HEALTH_OUTPUT"
-
-# Handle stuck workers
-echo "$HEALTH_OUTPUT" | grep "^STUCK:" | while read -r line; do
-    TASK_ID=$(echo "$line" | awk '{print $2}')
-    WINDOW_NAME="task-${TASK_ID}"
-    tmux kill-window -t "${SESSION}:${WINDOW_NAME}" 2>/dev/null || true
-    bash scripts/agentsquad/update-status.sh "$TASK_ID" status "blocked"
-    bash scripts/agentsquad/update-status.sh "$TASK_ID" blocked_reason "stuck — no status update for 45+ minutes"
-done
-```
-
-### Step 7: Spawn new workers
-
-Run: `bash scripts/agentsquad/conductor.sh spawn-next` (repeat until at capacity or no ready tasks)
-
-```bash
-while true; do
-    OUTPUT=$(bash scripts/agentsquad/conductor.sh spawn-next 2>&1)
-    echo "$OUTPUT"
-    # Stop if at capacity or no ready tasks
-    if echo "$OUTPUT" | grep -qE "(At capacity|No ready tasks)"; then
-        break
-    fi
-done
-```
-
-### Step 8: Cycle summary
-
-Run: `bash scripts/agentsquad/conductor.sh cycle-summary`
-
-Sends a notification with the full cycle summary:
+Report what happened during the tick:
 
 ```
-📊 Conductor Cycle:
-✅ Merged: issue-3 (PR #12)
-🔍 Review Ready: issue-5 (PR #14)
-⚙️ Active: issue-7, issue-8
-📋 Queued: issue-9
-🔴 Blocked: —
-Mode: manual
+=== Conductor Cycle ===
+
+Finalize:
+  + issue-42: pushed branch, created PR #17
+
+Reviews:
+  + issue-40: promoted to review-ready
+
+Approvals:
+  Manual approval required: issue-40
+
+Health:
+  OK: issue-45 (3m since update)
+  WARNING: issue-48 (22m since update)
+
+Spawn:
+  Spawned: issue-50
+  At capacity (3/3 workers active)
+
+Summary:
+  Merged: --
+  Review Ready: issue-40 (PR #15)
+  Active: issue-45, issue-48, issue-50
+  Queued: issue-51, issue-52
+  Blocked: --
+  Mode: manual
 ```
 
 ## Continuous Mode
 
-To run the conductor continuously:
+For hands-off operation, run the Conductor in a loop:
 
 ```bash
-# In a tmux session with Claude Code:
+# From a tmux session
+bash scripts/agentsquad/conductor.sh --loop 3m
+
+# Or via Claude Code
 /loop 5m /conductor
 ```
 
-This runs one cycle every 5 minutes, continuously watching the queue.
+The loop acquires a tick lock each cycle, runs the tick, releases the lock, then sleeps. Ctrl+C stops cleanly.
 
 ## Examples
 
-### Manual Run
+### Manual Single Tick
 
 ```
 User: /conductor
@@ -139,30 +149,26 @@ User: /conductor
 Claude:
 === Conductor Cycle ===
 
-Pre-flight: tmux session 'myproject' OK, .tasks/ found
-
-Finalize:
-  + task-42: pushed branch, created PR #17
-  No other tasks to finalize
-
-Health:
-  OK: task-45 (3m since update)
-  WARNING: task-48 (22m since update)
-
-Spawn:
-  Spawned: task-50
-  At capacity (3/3 workers active)
-
-Summary:
-| Status | Count | Tasks |
-|--------|-------|-------|
-| Active | 3 | task-45, task-48, task-50 |
-| Completed | 1 | task-42 (PR #17) |
-| Queued | 2 | task-51, task-52 |
-| Blocked | 0 | - |
+Finalize: No tasks to finalize.
+Reviews: No tasks to promote.
+Approvals: No tasks to approve.
+Health: OK: issue-12 (5m since update)
+Spawn: Spawned issue-15. At capacity (3/3).
+Summary sent.
 ```
 
-### Continuous Mode
+### Dry-Run Preview
+
+```
+User: /conductor --dry-run
+
+Claude:
+[DRY-RUN] Would finalize issue-42
+[DRY-RUN] Would promote issue-40 to review-ready
+[DRY-RUN] Would spawn worker for issue-45
+```
+
+### Continuous
 
 ```
 User: /loop 5m /conductor

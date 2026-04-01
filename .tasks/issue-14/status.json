@@ -1,16 +1,16 @@
 {
-  "task_id": "issue-10",
+  "task_id": "issue-14",
   "kind": "feature",
   "status": "ready",
   "priority": "P1",
   "complexity": "simple",
   "type": "implement",
   "branch": "",
-  "github_issue": 10,
-  "title": "Add CORS middleware and request logging",
+  "github_issue": 14,
+  "title": "Add health check with system info endpoint",
   "pr_url": "",
   "attempts": 0,
   "max_iterations": 15,
   "dependencies": [],
-  "updated_at": "2026-04-01T16:07:28Z"
+  "updated_at": "2026-04-01T18:27:21Z"
 }

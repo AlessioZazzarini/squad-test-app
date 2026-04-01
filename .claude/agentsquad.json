@@ -1,6 +1,6 @@
 {
   "project": "Squad Test App",
-  "description": "Flask REST API for testing AgentSquad",
+  "description": "Flask REST API",
   "commands": {
     "build": "python3 -m pytest",
     "test": "python3 -m pytest",
