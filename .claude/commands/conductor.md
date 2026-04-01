@@ -38,7 +38,31 @@ This finds all tasks with status "ready-for-review" and for each one:
 
 Report what was finalized.
 
-### Step 3: Health check
+### Step 3: Check review artifacts
+
+Run: `bash scripts/agentsquad/conductor.sh check-reviews`
+
+This finds all tasks with status "pr-created" and checks if `.tasks/<task-id>/pr-review.md` exists. If yes, promotes the task to "review-ready" and sends a notification.
+
+### Step 4: Apply approval policy
+
+Run: `bash scripts/agentsquad/conductor.sh approve-ready`
+
+For tasks with status "review-ready", reads the approval mode (per-task override or global config default):
+- **manual**: do nothing — wait for human to set "approved" via update-status.sh
+- **auto**: check CI status (`gh pr checks`) + sensitive paths policy. If all gates pass, set "approved".
+- **paused**: do nothing — global kill switch, no merges.
+
+### Step 5: Merge approved tasks
+
+Run: `bash scripts/agentsquad/conductor.sh merge-approved`
+
+For tasks with status "approved":
+- Runs `close-task.sh` (squash-merge + issue close + archive)
+- Sets status to "merged" on success
+- Leaves status at "approved" on failure
+
+### Step 6: Health check
 
 Run: `bash scripts/agentsquad/conductor.sh health`
 
@@ -63,7 +87,7 @@ echo "$HEALTH_OUTPUT" | grep "^STUCK:" | while read -r line; do
 done
 ```
 
-### Step 4: Spawn new workers
+### Step 7: Spawn new workers
 
 Run: `bash scripts/agentsquad/conductor.sh spawn-next` (repeat until at capacity or no ready tasks)
 
@@ -78,19 +102,20 @@ while true; do
 done
 ```
 
-### Step 5: Report
+### Step 8: Cycle summary
 
-Run: `bash scripts/agentsquad/conductor.sh status`
+Run: `bash scripts/agentsquad/conductor.sh cycle-summary`
 
-Output a summary table:
+Sends a notification with the full cycle summary:
 
 ```
-| Status | Count | Tasks |
-|--------|-------|-------|
-| Active | N | issue-1, issue-3 |
-| Completed | N | issue-2 (PR #5) |
-| Queued | N | issue-4 |
-| Blocked | N | - |
+📊 Conductor Cycle:
+✅ Merged: issue-3 (PR #12)
+🔍 Review Ready: issue-5 (PR #14)
+⚙️ Active: issue-7, issue-8
+📋 Queued: issue-9
+🔴 Blocked: —
+Mode: manual
 ```
 
 ## Continuous Mode

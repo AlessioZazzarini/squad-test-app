@@ -32,6 +32,7 @@ set -o pipefail
 # ── Load shared config ───────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/config.sh"
+source "$SCRIPT_DIR/lib/worktree.sh"
 
 # ── Configuration ─────────────────────────────────────────────
 MANIFEST_FILE=".tasks/orchestration-manifest.json"
@@ -212,29 +213,27 @@ compute_next_wave() {
 
 # ── Git worktree management ───────────────────────────────────
 # FIX #1: Each worker gets an isolated git worktree. No shared working directory.
-
+# Core functions (create_worktree, cleanup_worktree) sourced from lib/worktree.sh.
+# Override WORKTREE_BASE to use issue-prefixed paths for the manifest workflow.
 WORKTREE_BASE=".tasks/worktrees"
 
+# Override create_worktree for manifest workflow (uses issue-prefixed paths)
 create_worktree() {
     local issue=$1 branch=$2
     local wt_path="${WORKTREE_BASE}/issue-${issue}"
 
-    # Clean up stale worktree if it exists
     if [[ -d "$wt_path" ]]; then
         git worktree remove "$wt_path" --force 2>/dev/null || rm -rf "$wt_path"
     fi
 
-    # Create branch from main
     git branch -D "$branch" 2>/dev/null || true
     git worktree add "$wt_path" -b "$branch" "$MAIN_BRANCH" 2>/dev/null || {
-        # Branch might exist remotely
         git worktree add "$wt_path" "$branch" 2>/dev/null || {
             log "${RED}✗ Failed to create worktree for #$issue${NC}" >&2
             return 1
         }
     }
 
-    # FIX #6: Merge dependency branches so dependent tasks have their code
     local dep_branches
     dep_branches=$(get_dep_branches "$issue")
     if [[ -n "$dep_branches" ]]; then

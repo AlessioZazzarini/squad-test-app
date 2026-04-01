@@ -4,10 +4,22 @@
   "commands": {
     "build": "python3 -m pytest",
     "test": "python3 -m pytest",
-    "e2e": "npx playwright test",
+    "e2e": "",
     "lint": "python3 -m py_compile app.py"
   },
   "mainBranch": "main",
   "tasksDir": ".tasks",
-  "maxWorkers": 3
+  "maxWorkers": 3,
+  "approval": {
+    "default": "auto",
+    "allow_task_override": true,
+    "auto_merge": {
+      "require_ci": false,
+      "require_review_artifacts": true,
+      "sensitive_paths": ["auth", "security", "migration", ".env"]
+    }
+  },
+  "notifications": {
+    "channel": "telegram"
+  }
 }

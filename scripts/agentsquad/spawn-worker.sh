@@ -191,7 +191,27 @@ bash scripts/agentsquad/update-status.sh ${TASK_ID} status "testing-local"
 - Run the Build, Test, and Lint commands listed in the Commands section above
 - If tests fail, fix and retry (max 3 attempts)
 
-### Step 6: Complete
+### Step 6: Write Review Document
+Before marking ready-for-review, create \`${TASKS_DIR}/${TASK_ID}/pr-review.md\`:
+
+\`\`\`markdown
+# PR Review: ${TASK_ID}
+
+## What was done
+<2-3 sentences describing the change>
+
+## Files changed
+<bullet list>
+
+## How to verify
+1. <step-by-step>
+
+## Test results
+- Build: pass/fail
+- Tests: X passed, Y failed
+\`\`\`
+
+### Step 7: Complete
 \`\`\`bash
 bash scripts/agentsquad/update-status.sh ${TASK_ID} status "ready-for-review"
 \`\`\`

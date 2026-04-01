@@ -167,6 +167,27 @@ if [[ -z "$PROMPT_TEXT" ]]; then
   exit 0
 fi
 
+# Check if high-complexity task needs collab review (soft gate — warning only)
+COLLAB_WARNING=""
+if [[ -n "$PROMPT_TEXT" ]]; then
+  # Extract task ID from prompt (look for ".tasks/<task-id>/")
+  TASK_ID=$(echo "$PROMPT_TEXT" | grep -oE '\.tasks/[^/]+' | head -1 | sed 's|\.tasks/||')
+  if [[ -n "$TASK_ID" ]]; then
+    TASK_STATUS_FILE=".tasks/$TASK_ID/status.json"
+    if [[ -f "$TASK_STATUS_FILE" ]]; then
+      COMPLEXITY=$(jq -r '.complexity // "medium"' "$TASK_STATUS_FILE")
+      if [[ "$COMPLEXITY" == "high" ]]; then
+        EXEC_LOG=".tasks/$TASK_ID/execution-log.md"
+        if [[ -f "$EXEC_LOG" ]]; then
+          if ! grep -qi "collab\|codex\|secondary model\|cross-model" "$EXEC_LOG"; then
+            COLLAB_WARNING="WARNING: This is a high-complexity task. Consider using /collab-review before completing."
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
 # Update iteration in frontmatter (portable across macOS and Linux)
 # Create temp file, then atomically replace
 TEMP_FILE="${SQUAD_STATE_FILE}.tmp.$$"
@@ -199,7 +220,9 @@ BANNED PHRASES (if you think these, you are rationalizing):
 DO NOT NARRATE — EXECUTE. Describing remaining work instead of doing it is failure.
 PROGRESS IS NOT COMPLETION. Partial work toward a goal is not the goal.
 
-$PROMISE_INSTRUCTION"
+$PROMISE_INSTRUCTION
+${COLLAB_WARNING:+
+$COLLAB_WARNING}"
 
 # Output JSON to block the stop and feed prompt back
 # The "reason" field contains the prompt that will be sent back to Claude

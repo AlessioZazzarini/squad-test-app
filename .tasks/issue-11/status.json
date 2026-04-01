@@ -1,16 +1,16 @@
 {
-  "task_id": "issue-8",
+  "task_id": "issue-11",
   "kind": "feature",
   "status": "ready",
   "priority": "P0",
   "complexity": "high",
   "type": "implement",
   "branch": "",
-  "github_issue": 8,
-  "title": "Add JWT authentication with middleware and protected routes",
+  "github_issue": 11,
+  "title": "Add API key authentication for write endpoints",
   "pr_url": "",
   "attempts": 0,
   "max_iterations": 15,
-  "dependencies": [7],
-  "updated_at": "2026-04-01T15:16:41Z"
+  "dependencies": [10],
+  "updated_at": "2026-04-01T16:07:30Z"
 }
