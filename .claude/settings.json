@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/agentsquad/*)",
+      "Bash(jq *)",
+      "Bash(tmux *)",
+      "Bash(gh issue *)",
+      "Bash(gh pr *)",
+      "Bash(git *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/guardrails.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/session-summary.js",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/loop-stop.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
