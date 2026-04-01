@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+import app as app_module
 from app import app, items
 from auth import create_token
 
@@ -12,6 +13,7 @@ def client():
     app.config["TESTING"] = True
     with app.test_client() as c:
         items.clear()
+        app_module.next_id = 1
         yield c
 
 
@@ -214,6 +216,87 @@ def test_request_logging(client, capsys):
     captured = capsys.readouterr()
     assert "GET /health" in captured.out
     assert "ms" in captured.out
+
+
+# --- Tags ---
+
+def test_create_item_with_tags(client, auth_header):
+    resp = client.post("/items", json={"name": "Tagged", "tags": ["python", "api"]}, headers=auth_header)
+    assert resp.status_code == 201
+    assert resp.json["tags"] == ["python", "api"]
+
+
+def test_create_item_without_tags(client, auth_header):
+    resp = client.post("/items", json={"name": "No tags"}, headers=auth_header)
+    assert resp.status_code == 201
+    assert resp.json["tags"] == []
+
+
+def test_create_item_invalid_tags(client, auth_header):
+    resp = client.post("/items", json={"name": "Bad", "tags": "not-a-list"}, headers=auth_header)
+    assert resp.status_code == 400
+    assert "tags" in resp.json["error"]
+
+
+def test_create_item_tags_non_string_elements(client, auth_header):
+    resp = client.post("/items", json={"name": "Bad", "tags": [1, 2]}, headers=auth_header)
+    assert resp.status_code == 400
+
+
+def test_get_item_includes_tags(client, auth_header):
+    client.post("/items", json={"name": "X", "tags": ["go"]}, headers=auth_header)
+    resp = client.get("/items/1")
+    assert resp.status_code == 200
+    assert resp.json["tags"] == ["go"]
+
+
+def test_filter_items_by_tag(client, auth_header):
+    client.post("/items", json={"name": "A", "tags": ["python"]}, headers=auth_header)
+    client.post("/items", json={"name": "B", "tags": ["go"]}, headers=auth_header)
+    client.post("/items", json={"name": "C", "tags": ["python", "api"]}, headers=auth_header)
+    resp = client.get("/items?tag=python")
+    assert resp.status_code == 200
+    assert len(resp.json) == 2
+    names = [item["name"] for item in resp.json]
+    assert "A" in names
+    assert "C" in names
+
+
+def test_filter_items_by_tag_no_match(client, auth_header):
+    client.post("/items", json={"name": "A", "tags": ["python"]}, headers=auth_header)
+    resp = client.get("/items?tag=rust")
+    assert resp.status_code == 200
+    assert resp.json == []
+
+
+def test_update_tags(client, auth_header):
+    client.post("/items", json={"name": "X", "tags": ["old"]}, headers=auth_header)
+    resp = client.put("/items/1/tags", json={"tags": ["new-tag"]}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["tags"] == ["new-tag"]
+
+
+def test_update_tags_empty(client, auth_header):
+    client.post("/items", json={"name": "X", "tags": ["old"]}, headers=auth_header)
+    resp = client.put("/items/1/tags", json={"tags": []}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["tags"] == []
+
+
+def test_update_tags_not_found(client, auth_header):
+    resp = client.put("/items/999/tags", json={"tags": ["x"]}, headers=auth_header)
+    assert resp.status_code == 404
+
+
+def test_update_tags_invalid(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1/tags", json={"tags": "bad"}, headers=auth_header)
+    assert resp.status_code == 400
+
+
+def test_update_tags_requires_auth(client):
+    resp = client.put("/items/1/tags", json={"tags": ["x"]})
+    assert resp.status_code == 401
 
 
 # --- Global error handler ---

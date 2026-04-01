@@ -78,7 +78,11 @@ def create_item():
     if len(description) > 1000:
         return jsonify({"error": "description must be 1000 characters or fewer"}), 400
 
-    item = {"id": next_id, "name": name.strip(), "description": description}
+    tags = data.get("tags", [])
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        return jsonify({"error": "tags must be a list of strings"}), 400
+
+    item = {"id": next_id, "name": name.strip(), "description": description, "tags": tags}
     items.append(item)
     next_id += 1
     return jsonify(item), 201
@@ -101,7 +105,12 @@ def list_items():
     if offset < 0:
         return jsonify({"error": "offset must be >= 0"}), 400
 
-    result = items[offset : offset + limit]
+    tag = request.args.get("tag")
+    filtered = items
+    if tag:
+        filtered = [item for item in items if tag in item.get("tags", [])]
+
+    result = filtered[offset : offset + limit]
     return jsonify(result)
 
 
@@ -109,6 +118,20 @@ def list_items():
 def get_item(item_id):
     for item in items:
         if item["id"] == item_id:
+            return jsonify(item)
+    return jsonify({"error": "item not found"}), 404
+
+
+@app.route("/items/<int:item_id>/tags", methods=["PUT"])
+@require_auth
+def update_tags(item_id):
+    for item in items:
+        if item["id"] == item_id:
+            data = request.get_json(force=True, silent=True) or {}
+            tags = data.get("tags")
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                return jsonify({"error": "tags must be a list of strings"}), 400
+            item["tags"] = tags
             return jsonify(item)
     return jsonify({"error": "item not found"}), 404
 
