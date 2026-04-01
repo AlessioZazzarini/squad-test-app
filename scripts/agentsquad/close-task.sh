@@ -16,11 +16,17 @@ TASK_ID="${1:?Usage: close-task.sh <task_id>}"
 TASK_DIR="$PROJECT_ROOT/${TASKS_DIR}/${TASK_ID}"
 BRANCH="task/${TASK_ID}"
 
-# --- Dirty tree check ---
-if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-  echo "ERROR: Working tree is dirty. Commit or stash changes first." >&2
-  git status --short >&2
-  exit 1
+# --- Dirty tree check (ignore .tasks/ mutations from conductor) ---
+if git diff --quiet -- . ':!.tasks/' 2>/dev/null && git diff --cached --quiet -- . ':!.tasks/' 2>/dev/null; then
+  : # Clean (ignoring .tasks/)
+else
+  # Check if ONLY .tasks/ is dirty — that's OK
+  DIRTY_NON_TASKS=$(git status --short -- . ':!.tasks/' 2>/dev/null || true)
+  if [ -n "$DIRTY_NON_TASKS" ]; then
+    echo "ERROR: Working tree is dirty. Commit or stash changes first." >&2
+    git status --short >&2
+    exit 1
+  fi
 fi
 
 # --- Derive PR from branch name ---

@@ -35,13 +35,13 @@ fi
 # Determine if value is numeric, boolean, or string
 if [[ "$VALUE" =~ ^[0-9]+$ ]]; then
   jq --arg f "$FIELD" --argjson v "$VALUE" '.[$f] = $v | .updated_at = (now | todate)' \
-    "$STATUS_FILE" > "${STATUS_FILE}.tmp" && mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
+    "$STATUS_FILE" > "${STATUS_FILE}.tmp.$$" && mv "${STATUS_FILE}.tmp.$$" "$STATUS_FILE"
 elif [[ "$VALUE" == "true" || "$VALUE" == "false" ]]; then
   jq --arg f "$FIELD" --argjson v "$VALUE" '.[$f] = $v | .updated_at = (now | todate)' \
-    "$STATUS_FILE" > "${STATUS_FILE}.tmp" && mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
+    "$STATUS_FILE" > "${STATUS_FILE}.tmp.$$" && mv "${STATUS_FILE}.tmp.$$" "$STATUS_FILE"
 else
   jq --arg f "$FIELD" --arg v "$VALUE" '.[$f] = $v | .updated_at = (now | todate)' \
-    "$STATUS_FILE" > "${STATUS_FILE}.tmp" && mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
+    "$STATUS_FILE" > "${STATUS_FILE}.tmp.$$" && mv "${STATUS_FILE}.tmp.$$" "$STATUS_FILE"
 fi
 
 echo "Updated ${TASK_ID}: ${FIELD} = ${VALUE}"

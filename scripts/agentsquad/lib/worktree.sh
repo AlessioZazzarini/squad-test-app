@@ -44,12 +44,11 @@ create_worktree() {
 
   mkdir -p "$(dirname "$wt_path")"
 
-  # Prune stale worktree references and force-delete the branch
-  git worktree prune >/dev/null 2>&1 || true
-  git branch -D "$branch" >/dev/null 2>&1 || true
-  git worktree add "$wt_path" -b "$branch" "$MAIN_BRANCH" >/dev/null 2>&1 || {
+  # Create branch from main
+  git branch -D "$branch" 2>/dev/null || true
+  git worktree add "$wt_path" -b "$branch" "$MAIN_BRANCH" 2>/dev/null || {
     # Branch might exist remotely
-    git worktree add "$wt_path" "$branch" >/dev/null 2>&1 || {
+    git worktree add "$wt_path" "$branch" 2>/dev/null || {
       echo "ERROR: Failed to create worktree for $task_id" >&2
       return 1
     }

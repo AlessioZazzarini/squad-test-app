@@ -23,9 +23,9 @@ parse_epoch() {
   local ts="$1"
   local clean="${ts%%Z}"
   clean="${clean%%.*}"
-  if date -u -d "$ts" +%s 2>/dev/null; then
+  if date -d "$ts" +%s 2>/dev/null; then
     return
-  elif date -u -j -f "%Y-%m-%dT%H:%M:%S" "$clean" +%s 2>/dev/null; then
+  elif date -j -f "%Y-%m-%dT%H:%M:%S" "$clean" +%s 2>/dev/null; then
     return
   else
     echo "0"

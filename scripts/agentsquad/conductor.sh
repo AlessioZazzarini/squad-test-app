@@ -130,19 +130,27 @@ check_deps_met() {
   return 0
 }
 
-# ── Tick locking (flock) ─────────────────────────────────────
+# ── Tick locking (cross-platform: mkdir is atomic on all POSIX systems) ──
+LOCK_DIR="${LOCK_FILE}.d"
+
 acquire_tick_lock() {
-  mkdir -p "$(dirname "$LOCK_FILE")"
-  exec 200>"$LOCK_FILE"
-  if ! flock -n 200; then
-    echo "Another conductor tick is running. Skipping." >&2
-    exit 0
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    # Check if the lock holder is still alive (stale lock detection)
+    local lock_pid=""
+    [ -f "$LOCK_DIR/pid" ] && lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      echo "Another conductor tick is running (PID $lock_pid). Skipping." >&2
+      exit 0
+    fi
+    # Stale lock — previous run crashed. Clean up and retry.
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR" 2>/dev/null || { echo "Failed to acquire lock" >&2; exit 1; }
   fi
+  echo $$ > "$LOCK_DIR/pid"
 }
 
 release_tick_lock() {
-  flock -u 200 2>/dev/null || true
-  rm -f "$LOCK_FILE"
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
 }
 
 # ── Approval helpers ─────────────────────────────────────────
@@ -152,12 +160,14 @@ get_approval_mode() {
   local task_id="$1"
   local status_file="$PROJECT_ROOT/$TASKS_DIR/$task_id/status.json"
 
-  # Per-task override
-  local task_mode
-  task_mode=$(jq -r '.approval_mode // empty' "$status_file" 2>/dev/null)
-  if [ -n "$task_mode" ]; then
-    echo "$task_mode"
-    return
+  # Per-task override (skip for __global__ or missing files)
+  if [ "$task_id" != "__global__" ] && [ -f "$status_file" ]; then
+    local task_mode
+    task_mode=$(jq -r '.approval_mode // empty' "$status_file" 2>/dev/null)
+    if [ -n "$task_mode" ]; then
+      echo "$task_mode"
+      return
+    fi
   fi
 
   # Global config
@@ -381,14 +391,9 @@ cmd_finalize_all() {
     echo "No tasks with status 'ready-for-review' to finalize."
   else
     echo "Finalized $found task(s)."
-    # Clean up any remaining worktrees after finalization
+    # Clean up worktrees only for tasks that were finalized (status = ready-for-review → pr-created)
+    # Each task's worktree is already cleaned in cmd_finalize; only rmdir if empty
     if [ "$DRY_RUN" = false ] && [ -d "$PROJECT_ROOT/$TASKS_DIR/worktrees" ]; then
-      for wt_dir in "$PROJECT_ROOT/$TASKS_DIR/worktrees"/*/; do
-        [ -d "$wt_dir" ] || continue
-        local wt_task_id
-        wt_task_id=$(basename "$wt_dir")
-        (cd "$PROJECT_ROOT" && cleanup_worktree "$wt_task_id") 2>/dev/null || true
-      done
       rmdir "$PROJECT_ROOT/$TASKS_DIR/worktrees" 2>/dev/null || true
     fi
   fi
@@ -545,13 +550,15 @@ cmd_merge_approved() {
     fi
 
     if [ -n "$close_script" ]; then
+      # Set status to "merged" BEFORE close-task.sh, which archives/deletes the task dir
+      bash "$SCRIPT_DIR/update-status.sh" "$task_id" status "merged"
       if (cd "$PROJECT_ROOT" && bash "$close_script" "$task_id" 2>&1); then
-        bash "$SCRIPT_DIR/update-status.sh" "$task_id" status "merged"
         bash "$SCRIPT_DIR/notify.sh" "$(printf '\xE2\x9C\x85') *${task_id}* merged (PR #${pr_number:-?})" 2>/dev/null || true
         echo "Merged: $task_id (PR #${pr_number:-?})"
         found=$((found + 1))
       else
-        echo "ERROR: Merge failed for $task_id — leaving status at approved" >&2
+        echo "WARNING: close-task.sh failed for $task_id but status already set to merged" >&2
+        found=$((found + 1))
       fi
     else
       # No close-task.sh — try direct merge via gh
@@ -585,9 +592,9 @@ cmd_health() {
     local status
     status=$(jq -r '.status // "unknown"' "$status_file")
 
-    # Only check active statuses
+    # Only check active statuses — skip completed/finalized/ready-for-review
     case "$status" in
-      in_progress|implementing|testing-local|investigating) ;;
+      in_progress|implementing|testing-local|investigating|spawned) ;;
       *) continue ;;
     esac
 
@@ -624,8 +631,16 @@ cmd_health() {
 
 cmd_spawn_all() {
   local spawned=0
+  local -a failed_tasks=()
+  local spawn_attempts=0
+  local MAX_SPAWN_ATTEMPTS=$((MAX_WORKERS + 2))  # allow headroom for failures
 
   while true; do
+    spawn_attempts=$((spawn_attempts + 1))
+    if [ "$spawn_attempts" -gt "$MAX_SPAWN_ATTEMPTS" ]; then
+      log "Reached max spawn attempts ($MAX_SPAWN_ATTEMPTS) this tick — stopping"
+      break
+    fi
     # Count active workers
     local active
     active=$(bash "$SCRIPT_DIR/check-workers.sh" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
@@ -660,6 +675,13 @@ cmd_spawn_all() {
         continue
       }
 
+      # Skip tasks that already failed in this tick
+      local is_failed=false
+      for f in "${failed_tasks[@]+"${failed_tasks[@]}"}"; do
+        if [ "$f" = "$tid" ]; then is_failed=true; break; fi
+      done
+      [ "$is_failed" = true ] && continue
+
       next="$tid"
       break
     done
@@ -681,6 +703,7 @@ cmd_spawn_all() {
     local wt_path
     wt_path=$(cd "$PROJECT_ROOT" && create_worktree "$next" "$branch") || {
       echo "ERROR: Failed to create worktree for $next" >&2
+      failed_tasks+=("$next")
       continue
     }
 
@@ -776,7 +799,7 @@ run_tick() {
   echo "$health_output"
 
   # Handle stuck workers (kill tmux window, mark blocked)
-  echo "$health_output" | grep "^STUCK:" | while read -r line; do
+  echo "$health_output" | { grep "^STUCK:" || true; } | while read -r line; do
     local stuck_task
     stuck_task=$(echo "$line" | awk '{print $2}')
     if [ "$DRY_RUN" = true ]; then
