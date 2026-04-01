@@ -8,9 +8,10 @@
 
 set -euo pipefail
 
-# Resolve project root from script location
+# Resolve project root — prefer AGENTSQUAD_PROJECT_ROOT (set by conductor
+# when running in a worktree) over script-relative resolution
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="${AGENTSQUAD_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 TASKS_DIR="${AGENTSQUAD_TASKS_DIR:-.tasks}"
 

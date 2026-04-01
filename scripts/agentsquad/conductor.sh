@@ -685,7 +685,7 @@ cmd_spawn_all() {
     }
 
     echo "Spawning: $next (worktree: $wt_path)"
-    AGENTSQUAD_WORKDIR="$PROJECT_ROOT/$wt_path" bash "$SCRIPT_DIR/spawn-worker.sh" "$next"
+    AGENTSQUAD_WORKDIR="$PROJECT_ROOT/$wt_path" AGENTSQUAD_PROJECT_ROOT="$PROJECT_ROOT" bash "$SCRIPT_DIR/spawn-worker.sh" "$next"
     ((spawned++))
   done
 

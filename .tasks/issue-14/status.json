@@ -5,12 +5,13 @@
   "priority": "P1",
   "complexity": "simple",
   "type": "implement",
-  "branch": "",
+  "branch": "task/issue-14",
   "github_issue": 14,
   "title": "Add health check with system info endpoint",
   "pr_url": "",
   "attempts": 0,
   "max_iterations": 15,
   "dependencies": [],
-  "updated_at": "2026-04-01T18:27:21Z"
+  "updated_at": "2026-04-01T19:45:00Z",
+  "blocked_reason": "stuck — no status update for 45+ minutes"
 }

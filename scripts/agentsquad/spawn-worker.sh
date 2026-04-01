@@ -250,8 +250,10 @@ if tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | grep -q "^$
 fi
 
 # Must use claude-opus-4-6 — Sonnet runs out of context on complex tasks
+# AGENTSQUAD_PROJECT_ROOT ensures status updates write to canonical .tasks/
+# (not the worktree's local copy) when running in git worktree isolation
 tmux new-window -t "$SESSION" -n "$WINDOW_NAME" \
-  "cd ${WORK_DIR} && AGENTSQUAD_LOOP_ENABLED=1 claude --model claude-opus-4-6 --dangerously-skip-permissions"
+  "cd ${WORK_DIR} && AGENTSQUAD_PROJECT_ROOT='${AGENTSQUAD_PROJECT_ROOT:-$PROJECT_ROOT}' AGENTSQUAD_LOOP_ENABLED=1 claude --model claude-opus-4-6 --dangerously-skip-permissions"
 
 # Sleep 8 seconds after window creation (battle-tested: Claude Code needs time to initialize)
 sleep 8
