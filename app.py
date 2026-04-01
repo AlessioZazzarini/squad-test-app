@@ -122,6 +122,39 @@ def get_item(item_id):
     return jsonify({"error": "item not found"}), 404
 
 
+@app.route("/items/<int:item_id>", methods=["PUT"])
+@require_auth
+def update_item(item_id):
+    for item in items:
+        if item["id"] == item_id:
+            data = request.get_json(force=True, silent=True) or {}
+
+            if "name" in data:
+                name = data["name"]
+                if not isinstance(name, str) or name.strip() == "":
+                    return jsonify({"error": "name must be a non-empty string"}), 400
+                if len(name) > 200:
+                    return jsonify({"error": "name must be 200 characters or fewer"}), 400
+                item["name"] = name.strip()
+
+            if "description" in data:
+                description = data["description"]
+                if not isinstance(description, str):
+                    return jsonify({"error": "description must be a string"}), 400
+                if len(description) > 1000:
+                    return jsonify({"error": "description must be 1000 characters or fewer"}), 400
+                item["description"] = description
+
+            if "tags" in data:
+                tags = data["tags"]
+                if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                    return jsonify({"error": "tags must be a list of strings"}), 400
+                item["tags"] = tags
+
+            return jsonify(item)
+    return jsonify({"error": "item not found"}), 404
+
+
 @app.route("/items/<int:item_id>/tags", methods=["PUT"])
 @require_auth
 def update_tags(item_id):

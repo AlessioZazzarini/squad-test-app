@@ -269,6 +269,88 @@ def test_filter_items_by_tag_no_match(client, auth_header):
     assert resp.json == []
 
 
+# --- PUT /items/<id> (update item) ---
+
+def test_update_item_all_fields(client, auth_header):
+    client.post("/items", json={"name": "Original", "description": "Old desc", "tags": ["old"]}, headers=auth_header)
+    resp = client.put("/items/1", json={"name": "Updated", "description": "New desc", "tags": ["new"]}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["name"] == "Updated"
+    assert resp.json["description"] == "New desc"
+    assert resp.json["tags"] == ["new"]
+
+
+def test_update_item_name_only(client, auth_header):
+    client.post("/items", json={"name": "Original", "description": "Keep me", "tags": ["keep"]}, headers=auth_header)
+    resp = client.put("/items/1", json={"name": "Changed"}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["name"] == "Changed"
+    assert resp.json["description"] == "Keep me"
+    assert resp.json["tags"] == ["keep"]
+
+
+def test_update_item_tags_only(client, auth_header):
+    client.post("/items", json={"name": "Keep", "tags": ["old"]}, headers=auth_header)
+    resp = client.put("/items/1", json={"tags": ["new1", "new2"]}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["name"] == "Keep"
+    assert resp.json["tags"] == ["new1", "new2"]
+
+
+def test_update_item_description_only(client, auth_header):
+    client.post("/items", json={"name": "Keep", "description": "Old"}, headers=auth_header)
+    resp = client.put("/items/1", json={"description": "New"}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["name"] == "Keep"
+    assert resp.json["description"] == "New"
+
+
+def test_update_item_invalid_name_empty(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1", json={"name": ""}, headers=auth_header)
+    assert resp.status_code == 400
+
+
+def test_update_item_invalid_name_too_long(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1", json={"name": "a" * 201}, headers=auth_header)
+    assert resp.status_code == 400
+    assert "200" in resp.json["error"]
+
+
+def test_update_item_invalid_description_too_long(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1", json={"description": "d" * 1001}, headers=auth_header)
+    assert resp.status_code == 400
+    assert "1000" in resp.json["error"]
+
+
+def test_update_item_invalid_tags(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1", json={"tags": "not-a-list"}, headers=auth_header)
+    assert resp.status_code == 400
+    assert "tags" in resp.json["error"]
+
+
+def test_update_item_not_found(client, auth_header):
+    resp = client.put("/items/999", json={"name": "Nope"}, headers=auth_header)
+    assert resp.status_code == 404
+
+
+def test_update_item_requires_auth(client):
+    resp = client.put("/items/1", json={"name": "Nope"})
+    assert resp.status_code == 401
+
+
+def test_update_item_name_strips_whitespace(client, auth_header):
+    client.post("/items", json={"name": "X"}, headers=auth_header)
+    resp = client.put("/items/1", json={"name": "  Trimmed  "}, headers=auth_header)
+    assert resp.status_code == 200
+    assert resp.json["name"] == "Trimmed"
+
+
+# --- PUT /items/<id>/tags ---
+
 def test_update_tags(client, auth_header):
     client.post("/items", json={"name": "X", "tags": ["old"]}, headers=auth_header)
     resp = client.put("/items/1/tags", json={"tags": ["new-tag"]}, headers=auth_header)
