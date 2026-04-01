@@ -1,12 +1,29 @@
 """Squad Test App — Minimal Flask REST API with JWT auth."""
+import time
 import traceback
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
+from flask_cors import CORS
 from auth import create_token, require_auth, VALID_USERNAME, VALID_PASSWORD
 from rate_limit import init_rate_limiter
 
 app = Flask(__name__)
+CORS(app)
 init_rate_limiter(app)
+
+
+@app.before_request
+def start_timer():
+    g.start_time = time.time()
+
+
+@app.after_request
+def log_request(response):
+    start = getattr(g, "start_time", None)
+    if start is not None:
+        duration_ms = (time.time() - start) * 1000
+        print(f"{request.method} {request.path} {response.status_code} {duration_ms:.1f}ms")
+    return response
 
 # In-memory store
 items = []
