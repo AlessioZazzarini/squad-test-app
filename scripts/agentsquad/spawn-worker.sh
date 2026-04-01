@@ -134,6 +134,23 @@ Lint: ${AGENTSQUAD_LINT_CMD:-}
 
 ---
 
+## Cross-Model Collaboration
+
+If the task is complex (high complexity, architectural decisions, security-sensitive, or you're stuck after 2 attempts), use \`/collab\` to get a second opinion from a secondary model:
+
+\`\`\`
+/collab think: "Challenge my approach to [problem]. What am I missing?"
+/collab build: Delegate isolated implementation to the secondary model
+/collab review: Quick review of your changes before finalizing
+\`\`\`
+
+Rules:
+- Use /collab for architectural decisions and security-sensitive code
+- Use /collab-review before marking ready-for-review on complex tasks
+- Never overlap files between you and the secondary model
+
+---
+
 ## Operational Rules
 
 1. **Status updates:** ONLY via \`bash scripts/agentsquad/update-status.sh ${TASK_ID} <field> <value>\` — NEVER edit status.json directly
