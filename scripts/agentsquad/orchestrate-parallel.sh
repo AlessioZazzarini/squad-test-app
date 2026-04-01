@@ -29,16 +29,20 @@
 
 set -o pipefail
 
+# ── Load shared config ───────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/config.sh"
+
 # ── Configuration ─────────────────────────────────────────────
 MANIFEST_FILE=".tasks/orchestration-manifest.json"
 MANIFEST_LOCK=".tasks/orchestration.lock"
 LOG_FILE=".tasks/orchestration.log"
 PID_FILE=".tasks/orchestration.pid"
 MAX_ITERATIONS="${1:-20}"
-MAX_PARALLEL="${AGENTSQUAD_MAX_PARALLEL:-3}"
+MAX_PARALLEL="${AGENTSQUAD_MAX_WORKERS:-3}"
 TMUX_SESSION="${AGENTSQUAD_TMUX_SESSION:-$(basename "$(pwd)")}"
 TASKS_DIR="${AGENTSQUAD_TASKS_DIR:-.tasks}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MAIN_BRANCH="${AGENTSQUAD_MAIN_BRANCH:-main}"
 PROJECT_ROOT="$(pwd)"
 
 # ── Colors ────────────────────────────────────────────────────
@@ -222,7 +226,7 @@ create_worktree() {
 
     # Create branch from main
     git branch -D "$branch" 2>/dev/null || true
-    git worktree add "$wt_path" -b "$branch" main 2>/dev/null || {
+    git worktree add "$wt_path" -b "$branch" "$MAIN_BRANCH" 2>/dev/null || {
         # Branch might exist remotely
         git worktree add "$wt_path" "$branch" 2>/dev/null || {
             log "${RED}✗ Failed to create worktree for #$issue${NC}" >&2
@@ -273,7 +277,7 @@ process_issue() {
     fi
 
     # Create isolated worktree
-    local branch="squad/issue-$issue"
+    local branch="task/issue-$issue"
     local wt_path
     wt_path=$(create_worktree "$issue" "$branch")
     if [[ $? -ne 0 ]] || [[ -z "$wt_path" ]]; then

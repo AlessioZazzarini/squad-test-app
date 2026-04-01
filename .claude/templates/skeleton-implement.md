@@ -31,9 +31,9 @@ _Repeat for all phases..._
 
 | Suite | Status | Total | New |
 |-------|--------|-------|-----|
-| `npm run build` | PASS | — | — |
-| `npm run test` | PASS | | |
-| `npm run test:e2e` | PASS | | |
+| `{{BUILD_CMD}}` | PASS | — | — |
+| `{{TEST_CMD}}` | PASS | | |
+| `{{E2E_CMD}}` | PASS | | |
 
 ---
 
@@ -66,9 +66,9 @@ _Repeat for all phases..._
 ```bash
 git checkout main
 git merge {{BRANCH_NAME}}
-npm run build
-npm run test
-npm run test:e2e
+{{BUILD_CMD}}
+{{TEST_CMD}}
+{{E2E_CMD}}
 ```
 
 ---

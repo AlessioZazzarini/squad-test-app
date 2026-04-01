@@ -32,45 +32,26 @@ The following labels track task state (create them if missing):
    gh issue edit <number> --add-label "squad:queued" --remove-label "squad:ready"
    ```
 
-### Phase 2: Spawn Workers
+### Phase 2: Generate Manifest
 
-For each issue in order (respecting dependency graph):
+Generate `.tasks/orchestration-manifest.json` with the triaged issues, their dependencies, priorities, and initial status of `queued`.
 
-1. **Check worker capacity.** Run `check-workers.sh` to count active workers. Default max: 3 concurrent workers (configurable via `AGENTSQUAD_MAX_WORKERS`).
+### Phase 3: Run Parallel Orchestration
 
-2. **Wait for slot.** If at capacity, poll every 30 seconds until a worker finishes.
+Delegate all spawning, worktree isolation, push, and PR creation to the canonical orchestration script:
 
-3. **Prepare task files.** Create `.tasks/<task-id>/` with:
-   - `status.json` — initialized with issue metadata
-   - `acceptance-criteria.md` — from issue body
-   - `environment.md` — from issue labels or body (if present)
+```bash
+bash scripts/agentsquad/orchestrate-parallel.sh <max_iterations>
+```
 
-4. **Label in-progress:**
-   ```bash
-   gh issue edit <number> --add-label "squad:in-progress" --remove-label "squad:queued"
-   ```
+This script handles:
+- Git worktree isolation per worker (no shared working directories)
+- Wave-based parallel execution respecting dependency order
+- Commit, push, and PR creation for each completed task
+- Label updates (`squad:in-progress`, `squad:complete`, `squad:failed`)
+- Crash recovery and resume from manifest state
 
-5. **Spawn worker:**
-   ```bash
-   bash scripts/agentsquad/spawn-worker.sh <task-id>
-   ```
-
-### Phase 3: Monitor and Complete
-
-1. **Poll workers** every 60 seconds via `check-workers.sh`.
-
-2. **When a worker finishes** (window no longer alive):
-   - Read `status.json` for final status
-   - If `ready-for-review`: label `squad:complete`, remove `squad:in-progress`
-   - If `blocked`: label `squad:failed`, remove `squad:in-progress`, post blocked reason as issue comment
-   - Check if any dependent issues are now unblocked
-
-3. **Spawn next issue** if a slot opened and queued issues remain.
-
-4. **Completion report.** When all issues are processed, summarize:
-   - Completed: list with PR links
-   - Failed: list with blocked reasons
-   - Skipped: list with dependency issues
+**Do NOT reimplement spawning, worktree, push, or PR logic here.** The parallel script is the single canonical path.
 
 ## Rules
 

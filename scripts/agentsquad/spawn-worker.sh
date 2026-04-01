@@ -4,11 +4,18 @@
 
 set -euo pipefail
 
+# Source config if available
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+if [ -f "$LIB_DIR/config.sh" ]; then
+  source "$LIB_DIR/config.sh"
+fi
+
 # Resolve project root from script location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 TASKS_DIR="${AGENTSQUAD_TASKS_DIR:-.tasks}"
+WORK_DIR="${AGENTSQUAD_WORKDIR:-$PROJECT_ROOT}"
 
 TASK_ID="$1"
 WINDOW_NAME="task-${TASK_ID}"
@@ -119,6 +126,14 @@ ${ENV_INSTRUCTIONS}
 
 ---
 
+## Commands
+
+Build: ${AGENTSQUAD_BUILD_CMD:-pytest}
+Test: ${AGENTSQUAD_TEST_CMD:-pytest}
+Lint: ${AGENTSQUAD_LINT_CMD:-}
+
+---
+
 ## Operational Rules
 
 1. **Status updates:** ONLY via \`bash scripts/agentsquad/update-status.sh ${TASK_ID} <field> <value>\` — NEVER edit status.json directly
@@ -156,7 +171,7 @@ bash scripts/agentsquad/update-status.sh ${TASK_ID} branch "task/${TASK_ID}"
 \`\`\`bash
 bash scripts/agentsquad/update-status.sh ${TASK_ID} status "testing-local"
 \`\`\`
-- Run build, lint, unit tests, and E2E tests as appropriate
+- Run the Build, Test, and Lint commands listed in the Commands section above
 - If tests fail, fix and retry (max 3 attempts)
 
 ### Step 6: Complete
@@ -199,7 +214,7 @@ fi
 
 # Must use claude-opus-4-6 — Sonnet runs out of context on complex tasks
 tmux new-window -t "$SESSION" -n "$WINDOW_NAME" \
-  "cd ${PROJECT_ROOT} && AGENTSQUAD_LOOP_ENABLED=1 claude --model claude-opus-4-6 --dangerously-skip-permissions"
+  "cd ${WORK_DIR} && AGENTSQUAD_LOOP_ENABLED=1 claude --model claude-opus-4-6 --dangerously-skip-permissions"
 
 # Sleep 8 seconds after window creation (battle-tested: Claude Code needs time to initialize)
 sleep 8

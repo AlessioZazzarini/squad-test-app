@@ -131,9 +131,9 @@ _Repeat for each phase..._
 
 | Check | Command / Method | Pass Criteria |
 |-------|-----------------|---------------|
-| Build | `npm run build` | Zero errors |
-| Unit tests | `npm run test` | All pass, new tests for: [list] |
-| E2E | `npm run test:e2e` | Existing tests pass |
+| Build | `{{BUILD_CMD}}` | Zero errors |
+| Unit tests | `{{TEST_CMD}}` | All pass, new tests for: [list] |
+| E2E | `{{E2E_CMD}}` | Existing tests pass |
 | | | |
 
 ---

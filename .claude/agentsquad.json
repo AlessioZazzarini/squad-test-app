@@ -2,10 +2,10 @@
   "project": "Squad Test App",
   "description": "Flask REST API for testing AgentSquad",
   "commands": {
-    "build": "pytest",
-    "test": "pytest",
+    "build": "python3 -m pytest",
+    "test": "python3 -m pytest",
     "e2e": "npx playwright test",
-    "lint": "python -m py_compile app.py"
+    "lint": "python3 -m py_compile app.py"
   },
   "mainBranch": "main",
   "tasksDir": ".tasks",

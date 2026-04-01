@@ -68,14 +68,14 @@ Copy the Implementation Phases from the plan document. For each phase, structure
 **Changes:** {{Change numbers from plan}}
 **Files:** {{Files affected}}
 1. Implement each change as specified in the plan
-2. Run `npm run build` — must pass with zero errors
+2. Run `{{BUILD_CMD}}` — must pass with zero errors
 3. **Commit:** `git add -A && git commit -m "Phase 1: {{PHASE_1_TITLE}}"`
 
 ### Phase 2: {{PHASE_2_TITLE}}
 **Changes:** {{Change numbers from plan}}
 **Files:** {{Files affected}}
 1. Implement each change as specified in the plan
-2. Run `npm run build` — must pass with zero errors
+2. Run `{{BUILD_CMD}}` — must pass with zero errors
 3. **Commit:** `git add -A && git commit -m "Phase 2: {{PHASE_2_TITLE}}"`
 
 <!-- Repeat for all phases in the plan... -->
@@ -84,16 +84,16 @@ Copy the Implementation Phases from the plan document. For each phase, structure
 **Goal:** Write all new tests specified in the plan's Verification Matrix.
 1. Write all new unit tests
 2. Write all new E2E tests
-3. Run `npm run build` — must pass
-4. Run `npm run test` — ALL tests must pass
-5. Run `npm run test:e2e` — ALL tests must pass
+3. Run `{{BUILD_CMD}}` — must pass
+4. Run `{{TEST_CMD}}` — ALL tests must pass
+5. Run `{{E2E_CMD}}` — ALL tests must pass
 6. **Commit:** `git add -A && git commit -m "Phase N-1: All tests passing"`
 
 ### Phase N: Merge Report
 **Goal:** Document everything for the morning reviewer.
-1. Run `npm run build` — capture output
-2. Run `npm run test` — capture test count
-3. Run `npm run test:e2e` — capture test count
+1. Run `{{BUILD_CMD}}` — capture output
+2. Run `{{TEST_CMD}}` — capture test count
+3. Run `{{E2E_CMD}}` — capture test count
 4. Run `git log --oneline` to get commit hashes
 5. Create `MERGE-REPORT-{{FEATURE_NAME}}.md` in repo root with:
    - Branch name
@@ -114,15 +114,15 @@ Copy the Implementation Phases from the plan document. For each phase, structure
 Output `<promise>{{MAGIC_WORD}}</promise>` ONLY when ALL gates pass.
 
 ### Gate 1: Compilation
-- [ ] `npm run build` exits with code 0 and zero errors
+- [ ] `{{BUILD_CMD}}` exits with code 0 and zero errors
 
 ### Gate 2: Unit Tests
-- [ ] `npm run test` exits with code 0
+- [ ] `{{TEST_CMD}}` exits with code 0
 - [ ] All pre-existing tests still pass (zero regressions)
 - [ ] All new tests specified in the plan are written and passing
 
 ### Gate 3: E2E Tests
-- [ ] `npm run test:e2e` exits with code 0
+- [ ] `{{E2E_CMD}}` exits with code 0
 - [ ] All pre-existing E2E tests still pass (zero regressions)
 - [ ] All new E2E tests specified in the plan are written and passing
 
@@ -145,7 +145,7 @@ Each check should be a binary pass/fail condition. Example:
 ### Gate 6: Merge Report
 - [ ] `MERGE-REPORT-{{FEATURE_NAME}}.md` exists in repo root
 - [ ] Contains all required sections with real data (no fabricated hashes or counts)
-- [ ] Test counts match actual `npm run test` output
+- [ ] Test counts match actual `{{TEST_CMD}}` output
 
 ### Gate 7: Execution Log
 - [ ] `.claude/plans/execution-log-{{TASK_NAME}}.md` exists
@@ -161,8 +161,8 @@ Each check should be a binary pass/fail condition. Example:
 1. **Follow the plan exactly.** `.claude/plans/{{PLAN_FILE_PATH}}` specifies every code change. Do not redesign or skip any change.
 2. **If lost, re-read this file first**, then the relevant Change section in the plan.
 3. **Never commit to main.**
-4. **Run `npm run build` after every phase.** Fix before moving on.
-5. **Run `npm run test` after test-related phases.** Fix before moving on.
+4. **Run `{{BUILD_CMD}}` after every phase.** Fix before moving on.
+5. **Run `{{TEST_CMD}}` after test-related phases.** Fix before moving on.
 6. **When writing tests, test real behavior.** Mock external dependencies but test actual logic.
 7. **If a file path or line number in the plan doesn't match,** search for the code patterns described to find the correct location.
 8. **Do not modify files outside the plan's scope** unless required to fix build failures caused by your changes.
