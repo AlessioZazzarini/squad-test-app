@@ -111,17 +111,17 @@ def test_list_items_default(client):
     assert resp.json == []
 
 
-def test_list_items_with_data(client):
-    client.post("/items", json={"name": "A"})
-    client.post("/items", json={"name": "B"})
+def test_list_items_with_data(client, auth_header):
+    client.post("/items", json={"name": "A"}, headers=auth_header)
+    client.post("/items", json={"name": "B"}, headers=auth_header)
     resp = client.get("/items")
     assert resp.status_code == 200
     assert len(resp.json) == 2
 
 
-def test_list_items_limit_offset(client):
+def test_list_items_limit_offset(client, auth_header):
     for i in range(5):
-        client.post("/items", json={"name": f"Item {i}"})
+        client.post("/items", json={"name": f"Item {i}"}, headers=auth_header)
     resp = client.get("/items?limit=2&offset=1")
     assert resp.status_code == 200
     assert len(resp.json) == 2
