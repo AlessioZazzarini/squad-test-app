@@ -1,0 +1,10 @@
+{
+  "task_id": "issue-2",
+  "github_issue": 2,
+  "title": "SQLite persistent storage with config switch",
+  "status": "queued",
+  "depends_on": [1],
+  "attempts": 0,
+  "max_attempts": 3,
+  "created_at": "2026-04-01T00:00:00Z"
+}

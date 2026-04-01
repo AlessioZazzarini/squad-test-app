@@ -206,6 +206,6 @@ sleep 8
 
 # Send loop start command — reference the prompt file so worker reads full context
 tmux send-keys -t "${SESSION}:${WINDOW_NAME}" \
-  "/ralph-start \"Read ${TASKS_DIR}/${TASK_ID}/.worker-prompt.md and follow every instruction in it exactly. You are a worker on task ${TASK_ID}.\" --max-iterations ${MAX_ITER} --completion-promise \"ready-for-review\"" C-m
+  "/loop-start \"Read ${TASKS_DIR}/${TASK_ID}/.worker-prompt.md and follow every instruction in it exactly. You are a worker on task ${TASK_ID}.\" --max-iterations ${MAX_ITER} --completion-promise \"ready-for-review\"" C-m
 
 echo "Spawned worker: ${WINDOW_NAME} (${PRIORITY}/${COMPLEXITY}, type=${TASK_TYPE}, max ${MAX_ITER} iterations)"
