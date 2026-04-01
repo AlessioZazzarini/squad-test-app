@@ -1,4 +1,5 @@
 """Squad Test App — Minimal Flask REST API with JWT auth."""
+import os
 import time
 import traceback
 
@@ -10,6 +11,12 @@ from rate_limit import init_rate_limiter
 app = Flask(__name__)
 CORS(app)
 init_rate_limiter(app)
+
+APP_START_TIME = time.time()
+
+_version_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+with open(_version_path) as _f:
+    APP_VERSION = _f.read().strip()
 
 
 @app.before_request
@@ -32,7 +39,12 @@ next_id = 1
 
 @app.route("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "uptime_seconds": round(time.time() - APP_START_TIME, 2),
+        "items_count": len(items),
+    }
 
 
 @app.route("/auth/login", methods=["POST"])

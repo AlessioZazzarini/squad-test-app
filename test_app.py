@@ -26,7 +26,27 @@ def auth_header():
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json["status"] == "ok"
+    data = resp.json
+    assert data["status"] == "ok"
+    assert data["version"] == "1.0.0"
+    assert isinstance(data["uptime_seconds"], (int, float))
+    assert data["uptime_seconds"] >= 0
+    assert data["items_count"] == 0
+
+
+def test_health_items_count(client, auth_header):
+    client.post("/items", json={"name": "A"}, headers=auth_header)
+    client.post("/items", json={"name": "B"}, headers=auth_header)
+    resp = client.get("/health")
+    assert resp.json["items_count"] == 2
+
+
+def test_health_uptime_increases(client):
+    import time
+    r1 = client.get("/health")
+    time.sleep(0.05)
+    r2 = client.get("/health")
+    assert r2.json["uptime_seconds"] >= r1.json["uptime_seconds"]
 
 
 # --- POST /items validation ---
