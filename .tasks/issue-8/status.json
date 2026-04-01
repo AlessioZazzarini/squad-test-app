@@ -1,0 +1,16 @@
+{
+  "task_id": "issue-8",
+  "kind": "feature",
+  "status": "ready",
+  "priority": "P0",
+  "complexity": "high",
+  "type": "implement",
+  "branch": "",
+  "github_issue": 8,
+  "title": "Add JWT authentication with middleware and protected routes",
+  "pr_url": "",
+  "attempts": 0,
+  "max_iterations": 15,
+  "dependencies": [7],
+  "updated_at": "2026-04-01T15:16:41Z"
+}

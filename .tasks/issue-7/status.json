@@ -1,0 +1,16 @@
+{
+  "task_id": "issue-7",
+  "kind": "feature",
+  "status": "ready",
+  "priority": "P1",
+  "complexity": "medium",
+  "type": "implement",
+  "branch": "",
+  "github_issue": 7,
+  "title": "Add input validation and error handling to all endpoints",
+  "pr_url": "",
+  "attempts": 0,
+  "max_iterations": 15,
+  "dependencies": [],
+  "updated_at": "2026-04-01T15:16:40Z"
+}
